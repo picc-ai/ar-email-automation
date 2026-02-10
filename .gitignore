@@ -1,0 +1,51 @@
+# =============================================================================
+# AR Email Automation -- .gitignore
+# =============================================================================
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# --- Virtual environments ---
+venv/
+.venv/
+env/
+
+# --- Streamlit secrets (NEVER commit) ---
+.streamlit/secrets.toml
+
+# --- Customer data (NEVER commit) ---
+data/
+output/
+
+# --- Internal agent outputs (development docs, not for deploy) ---
+agent-outputs/
+
+# --- IDE ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# --- OS files ---
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# --- Pytest cache ---
+.pytest_cache/
+
+# --- Logs ---
+*.log
+
+# --- Environment files ---
+.env
+.env.local
+.env.production

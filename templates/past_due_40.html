@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PICC - {{STORE_NAME}} - Nabis Invoice {{INVOICE_NUMBER}} - 40+ Days Past Due</title>
+  <!--
+    PICC AR Email Template: 40+ DAYS PAST DUE (T4)
+    =================================================
+    Tier: T4 - 40+ Days Past Due
+    Trigger: Invoice is 40-49 days past due
+    Tone: Urgent, direct, firm -- potential account consequences
+    Urgency: HIGH
+    Attachment: Nabis ACH Payment Form.pdf + Invoice copy if available
+    CC Rule: Base team + sales rep + Nabis AM (explicit) + store owner/AP if known
+
+    Subject Line Formula:
+      PICC - {{STORE_NAME}} - Nabis Invoice {{INVOICE_NUMBER}} - 40+ Days Past Due - ACTION REQUIRED
+
+    ESCALATION DESIGN (IMPROVED - this was previously identical to 30+ and 50+):
+    - This is the SECOND Past Due tier: urgency increases significantly
+    - "Second notice" language replaces "friendly reminder"
+    - Specific OCM deadline calculated and shown: "{{DAYS_UNTIL_OCM_REPORT}} days"
+    - NEW: Mentions potential account hold on future orders
+    - NEW: Requests payment by a specific deadline date
+    - "We request immediate attention" replaces "we kindly ask"
+    - Empathy language reduced from T3 ("oversights happen" removed)
+    - Partnership language maintained but urgency dominates
+
+    KEY DIFFERENCES FROM 30+ DAYS (T3):
+    - Subject line adds "ACTION REQUIRED" suffix
+    - "Second notice" framing
+    - Specific countdown to OCM reporting
+    - Account hold warning introduced
+    - Explicit payment deadline date requested
+    - Shorter empathy, more direct ask
+  -->
+</head>
+<body style="margin:0; padding:0; background-color:#ffffff;">
+  <div dir="ltr" style="font-family:Arial,Helvetica,sans-serif; font-size:10pt; color:#000000;">
+
+    <!-- GREETING -->
+    <div style="font-family:Arial,Helvetica,sans-serif;">
+      <span style="font-family:Arial,Helvetica,sans-serif;">Hello {{CONTACT_FIRST_NAME}},</span>
+    </div>
+
+    <br>
+
+    <!-- OPENING - SECOND NOTICE FRAMING -->
+    <div style="font-family:Arial,Helvetica,sans-serif;">
+      I hope this message finds you well. This is a <strong>second notice</strong> from PICC Platform's Accounts Receivable department regarding an outstanding invoice that is now over 40 days past due.
+    </div>
+
+    <br>
+
+    <!-- URGENT OCM WARNING WITH COUNTDOWN -->
+    <div style="font-family:Arial,Helvetica,sans-serif;">
+      <strong>Your account is approaching the OCM reporting threshold.</strong> Per Nabis policy, accounts with invoices unpaid beyond 52 days are reported to the Office of Cannabis Management (OCM). Based on your current invoice, you have approximately <strong>{{DAYS_UNTIL_OCM_REPORT}} days</strong> before this reporting is triggered.
+    </div>
+
+    <br>
+
+    <!-- INVOICE DETAILS INTRO -->
+    <div style="font-family:Arial,Helvetica,sans-serif;">
+      According to our records, the following invoice remains unpaid:
+    </div>
+
+    <br>
+
+    <!-- INVOICE DATA BLOCK -->
+    <ul style="font-family:Arial,Helvetica,sans-serif; margin-left:20px; padding-left:0;">
+      <li><strong>Invoice/Order</strong>: <span style="font-size:11pt; font-family:Arial,Helvetica,sans-serif;">{{INVOICE_NUMBER}}</span></li>
+      <li><strong>Due</strong>: <span style="font-size:11pt; font-family:Arial,Helvetica,sans-serif;">{{DUE_DATE}}</span></li>
+      <li><strong>Days Past Due</strong>: <span style="font-size:11pt; font-family:Arial,Helvetica,sans-serif;">{{DAYS_PAST_DUE}}</span></li>
+      <li><strong>Nabis Account Manager</strong>: <span style="font-size:11pt; font-family:Arial,Helvetica,sans-serif;">{{NABIS_AM_NAME}} - {{NABIS_AM_PHONE}}</span></li>
+      <li><strong>Amount</strong>: <span style="font-size:11pt; font-family:Arial,Helvetica,sans-serif;">{{AMOUNT}}</span></li>
+    </ul>
+
+    <br>
+
+    <!-- ATTACHMENT REFERENCE -->
+    <div style="font-family:Arial,Helvetica,sans-serif;">
+      <strong>Attached is the Nabis ACH payment form (PDF) to facilitate your payment.</strong>
+    </div>
+
+    <br>
+
+    <!-- ACCOUNT HOLD WARNING (NEW - escalation improvement) -->
+    <div style="font-family:Arial,Helvetica,sans-serif;">
+      Please be advised that continued non-payment may result in a hold being placed on your account, which could affect future order processing. We want to avoid any disruption to your business and are committed to helping resolve this promptly.
+    </div>
+
+    <br>
+
+    <!-- PAYMENT FACILITATION -->
+    <div style="font-family:Arial,Helvetica,sans-serif;">
+      Payments can be submitted through Nabis directly. Your Nabis account manager is CC'd on this email and can assist with processing.
+    </div>
+
+    <br>
+
+    <!-- EXPLICIT DEADLINE REQUEST (NEW - escalation improvement) -->
+    <div style="font-family:Arial,Helvetica,sans-serif;">
+      <strong>We request that payment be submitted by {{PAYMENT_DEADLINE}} to avoid any account restrictions or OCM reporting.</strong> If you are experiencing any difficulties with payment or if there is a dispute regarding this invoice, please contact us immediately so we can work together to find a resolution.
+    </div>
+
+    <br>
+
+    <!-- CLOSING -->
+    <div style="font-family:Arial,Helvetica,sans-serif;">
+      Thank you for your immediate attention to this matter. We value our business relationship and want to ensure it continues without interruption.
+    </div>
+
+    <br>
+
+    <!-- SIGN-OFF -->
+    <div style="font-family:Arial,Helvetica,sans-serif;">
+      Regards,
+    </div>
+
+    <br>
+
+    <!-- SIGNATURE BLOCK -->
+    <div dir="ltr" class="gmail_signature" data-smartmail="gmail_signature">
+      <div dir="ltr">
+        <div>
+          <div dir="ltr">
+            <div dir="ltr">
+              <b style="font-family:Arial,Helvetica,sans-serif;">{{SENDER_NAME}}</b><br>
+              <span style="font-family:Arial,Helvetica,sans-serif;">PICC Platform</span><br>
+              <span style="font-family:Arial,Helvetica,sans-serif;">{{SENDER_TITLE}}</span><br>
+              <span style="font-family:Arial,Helvetica,sans-serif;">171 East 2nd St.</span><br>
+              <span style="font-family:Arial,Helvetica,sans-serif;">Huntington Station, NY 11746</span><br>
+              <br>
+              <i style="font-family:Arial,Helvetica,sans-serif;">"Where innovation meets inhalation, PICC the perfect pre-roll."</i><br>
+              <span style="font-family:Arial,Helvetica,sans-serif;">IG: <a href="https://www.instagram.com/piccplatform/" target="_blank" style="color:#1155cc;">@piccplatform</a></span><br>
+              <span style="font-family:Arial,Helvetica,sans-serif;"><a href="https://piccnewyork.notion.site/PICC-NY-WHOLESALE-265a86d9999880cb9e71d4091d21e8d5" target="_blank" style="color:#1155cc;">PICC NY Wholesale</a></span><br>
+              <br>
+              <span style="font-family:Arial,Helvetica,sans-serif;"><a href="https://www.piccplatform.com/" target="_blank" style="color:#1155cc;">www.piccplatform.com</a></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <br>
+
+    <!-- CONFIDENTIALITY NOTICE -->
+    <div style="font-family:Arial,Helvetica,sans-serif; font-size:8pt; color:#666666;">
+      Email Confidentiality Notice: This e-mail and any files transmitted with it are confidential and are intended solely for the use of the individual or entity to which they are addressed. The authorized recipient of this information is prohibited from disclosing this information to any other party unless authorized. If you are not the intended recipient of this e-mail please note that you have received this e-mail in error and any use, dissemination, forwarding, printing or copying of this e-mail is strictly prohibited. If you have received this e-mail in error, please immediately contact the sender of this message.
+    </div>
+
+  </div>
+</body>
+</html>

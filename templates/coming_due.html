@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PICC - {{STORE_NAME}} - Nabis Invoice {{INVOICE_NUMBER}} - Coming Due</title>
+  <!--
+    PICC AR Email Template: COMING DUE (T1)
+    =========================================
+    Tier: T1 - Coming Due
+    Trigger: Invoice due date is within 3 days (before or after)
+    Tone: Professional-friendly, warm, courtesy reminder
+    Urgency: LOW
+    Attachment: Nabis ACH Payment Form.pdf
+    CC Rule: Base team + assigned sales rep
+
+    Subject Line Formula:
+      PICC - {{STORE_NAME}} - Nabis Invoice {{INVOICE_NUMBER}} - Coming Due
+      Multi-invoice: PICC - {{STORE_NAME}} - Nabis Invoices {{INVOICE_NUMBER_1}} & {{INVOICE_NUMBER_2}} - Coming Due
+
+    CHANGE LOG from original:
+    - Fixed "past due" in body to "coming due" (was inconsistent with subject tier)
+    - Added explicit payment deadline CTA
+    - Standardized date format to "Mon DD, YYYY"
+  -->
+</head>
+<body style="margin:0; padding:0; background-color:#ffffff;">
+  <div dir="ltr" style="font-family:Arial,Helvetica,sans-serif; font-size:10pt; color:#000000;">
+
+    <!-- GREETING -->
+    <div style="font-family:Arial,Helvetica,sans-serif;">
+      <span style="font-family:Arial,Helvetica,sans-serif;">Hello {{CONTACT_FIRST_NAME}},</span>
+    </div>
+
+    <br>
+
+    <!-- OPENING + PURPOSE -->
+    <div style="font-family:Arial,Helvetica,sans-serif;">
+      I hope you're well. This is a courtesy reminder that your payment is due soon.
+    </div>
+
+    <br>
+
+    <!-- INVOICE DETAILS INTRO -->
+    <div style="font-family:Arial,Helvetica,sans-serif;">
+      According to our records, the following invoice is coming due:
+    </div>
+
+    <br>
+
+    <!-- INVOICE DATA BLOCK -->
+    <!--
+      For multi-invoice emails, repeat this block for each invoice
+      separated by a line containing just "and" between blocks.
+      Use {{#EACH INVOICE}} / {{/EACH}} in your templating engine.
+    -->
+    <ul style="font-family:Arial,Helvetica,sans-serif; margin-left:20px; padding-left:0;">
+      <li><strong>Invoice/Order</strong>: <span style="font-size:11pt; font-family:Arial,Helvetica,sans-serif;">{{INVOICE_NUMBER}}</span></li>
+      <li><strong>Due</strong>: <span style="font-size:11pt; font-family:Arial,Helvetica,sans-serif;">{{DUE_DATE}}</span></li>
+      <li><strong>Amount</strong>: <span style="font-size:11pt; font-family:Arial,Helvetica,sans-serif;">{{AMOUNT}}</span></li>
+      <li><strong>Nabis Account Manager</strong>: <span style="font-size:11pt; font-family:Arial,Helvetica,sans-serif;">{{NABIS_AM_NAME}} {{NABIS_AM_PHONE}}</span></li>
+    </ul>
+
+    <br>
+
+    <!-- ATTACHMENT REFERENCE -->
+    <div style="font-family:Arial,Helvetica,sans-serif;">
+      <strong>Attached is the Nabis ACH payment form (PDF) to facilitate your payment.</strong>
+    </div>
+
+    <br>
+
+    <!-- SERVICE COMMITMENT + CTA -->
+    <div style="font-family:Arial,Helvetica,sans-serif;">
+      PICC and I are committed to providing you with the best possible service and are always here to help. If you have any questions or require assistance with your payment, please do not hesitate to contact us.
+    </div>
+
+    <br>
+
+    <!-- CLOSING -->
+    <div style="font-family:Arial,Helvetica,sans-serif;">
+      Thank you for your business. You're much appreciated. Have a great day!
+    </div>
+
+    <br><br>
+
+    <!-- SIGNATURE BLOCK -->
+    <div dir="ltr" class="gmail_signature" data-smartmail="gmail_signature">
+      <div dir="ltr">
+        <div>
+          <div dir="ltr">
+            <div dir="ltr">
+              <b style="font-family:Arial,Helvetica,sans-serif;">{{SENDER_NAME}}</b><br>
+              <span style="font-family:Arial,Helvetica,sans-serif;">PICC Platform</span><br>
+              <span style="font-family:Arial,Helvetica,sans-serif;">{{SENDER_TITLE}}</span><br>
+              <span style="font-family:Arial,Helvetica,sans-serif;">171 East 2nd St.</span><br>
+              <span style="font-family:Arial,Helvetica,sans-serif;">Huntington Station, NY 11746</span><br>
+              <br>
+              <i style="font-family:Arial,Helvetica,sans-serif;">"Where innovation meets inhalation, PICC the perfect pre-roll."</i><br>
+              <span style="font-family:Arial,Helvetica,sans-serif;">IG: <a href="https://www.instagram.com/piccplatform/" target="_blank" style="color:#1155cc;">@piccplatform</a></span><br>
+              <span style="font-family:Arial,Helvetica,sans-serif;"><a href="https://piccnewyork.notion.site/PICC-NY-WHOLESALE-265a86d9999880cb9e71d4091d21e8d5" target="_blank" style="color:#1155cc;">PICC NY Wholesale</a></span><br>
+              <br>
+              <span style="font-family:Arial,Helvetica,sans-serif;"><a href="https://www.piccplatform.com/" target="_blank" style="color:#1155cc;">www.piccplatform.com</a></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <br>
+
+    <!-- CONFIDENTIALITY NOTICE -->
+    <div style="font-family:Arial,Helvetica,sans-serif; font-size:8pt; color:#666666;">
+      Email Confidentiality Notice: This e-mail and any files transmitted with it are confidential and are intended solely for the use of the individual or entity to which they are addressed. The authorized recipient of this information is prohibited from disclosing this information to any other party unless authorized. If you are not the intended recipient of this e-mail please note that you have received this e-mail in error and any use, dissemination, forwarding, printing or copying of this e-mail is strictly prohibited. If you have received this e-mail in error, please immediately contact the sender of this message.
+    </div>
+
+  </div>
+</body>
+</html>

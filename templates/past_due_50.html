@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PICC - {{STORE_NAME}} - Nabis Invoice {{INVOICE_NUMBER}} - 50+ Days Past Due</title>
+  <!--
+    PICC AR Email Template: 50+ DAYS PAST DUE (T5)
+    =================================================
+    Tier: T5 - 50+ Days Past Due
+    Trigger: Invoice is 50+ days past due
+    Tone: FINAL NOTICE -- direct, consequential, no-nonsense
+    Urgency: CRITICAL
+    Attachment: Nabis ACH Payment Form.pdf + Invoice copy + Account statement
+    CC Rule: Base team + sales rep + Nabis AR dept + store owner/AP + PICC management
+    Sender: May escalate from Sales Admin to Regional Account Manager
+
+    Subject Line Formula:
+      PICC - {{STORE_NAME}} - Nabis Invoice {{INVOICE_NUMBER}} - 50+ Days Past Due - FINAL NOTICE
+
+    ESCALATION DESIGN (IMPROVED - this was previously identical to 30+ and 40+):
+    - This is the FINAL email tier before OCM reporting / collections
+    - "FINAL NOTICE" language -- no more "friendly reminder" or "we understand"
+    - Explicit statement that OCM reporting will happen within days
+    - Account is ON HOLD for new orders
+    - Mentions potential collections referral
+    - "Payment is required immediately" -- no hedging
+    - Empathy language REMOVED entirely
+    - Deadline is not a request -- it is a requirement
+    - Optional: Sender escalates to Mario Serrano (Regional Account Manager)
+
+    KEY DIFFERENCES FROM 40+ DAYS (T4):
+    - Subject line adds "FINAL NOTICE" instead of "ACTION REQUIRED"
+    - "Final notice" framing replaces "second notice"
+    - Account hold is no longer potential -- it IS in effect
+    - Collections/legal language introduced
+    - No empathy clause ("oversights happen" removed)
+    - Payment is "required" not "requested"
+    - Specific OCM report date calculated
+    - May come from Regional Account Manager instead of Sales Admin
+  -->
+</head>
+<body style="margin:0; padding:0; background-color:#ffffff;">
+  <div dir="ltr" style="font-family:Arial,Helvetica,sans-serif; font-size:10pt; color:#000000;">
+
+    <!-- GREETING -->
+    <div style="font-family:Arial,Helvetica,sans-serif;">
+      <span style="font-family:Arial,Helvetica,sans-serif;">Hello {{CONTACT_FIRST_NAME}},</span>
+    </div>
+
+    <br>
+
+    <!-- OPENING - FINAL NOTICE FRAMING -->
+    <div style="font-family:Arial,Helvetica,sans-serif;">
+      <strong>This is a final notice</strong> from PICC Platform regarding Nabis Invoice {{INVOICE_NUMBER}}, which is now over <strong>{{DAYS_PAST_DUE}} days past due</strong>. Despite previous reminders, payment has not been received.
+    </div>
+
+    <br>
+
+    <!-- IMMINENT OCM REPORTING -->
+    <div style="font-family:Arial,Helvetica,sans-serif; padding:10px; border-left:4px solid #cc0000; background-color:#fff8f8;">
+      <strong>Immediate action is required.</strong> Per Nabis policy, your account is at or past the threshold for reporting to the Office of Cannabis Management (OCM). Nabis is required to report accounts with invoices unpaid beyond 52 days. Your account {{OCM_STATUS_PHRASE}}.
+    </div>
+
+    <br>
+
+    <!-- INVOICE DETAILS INTRO -->
+    <div style="font-family:Arial,Helvetica,sans-serif;">
+      The outstanding invoice details are as follows:
+    </div>
+
+    <br>
+
+    <!-- INVOICE DATA BLOCK -->
+    <ul style="font-family:Arial,Helvetica,sans-serif; margin-left:20px; padding-left:0;">
+      <li><strong>Invoice/Order</strong>: <span style="font-size:11pt; font-family:Arial,Helvetica,sans-serif;">{{INVOICE_NUMBER}}</span></li>
+      <li><strong>Original Due Date</strong>: <span style="font-size:11pt; font-family:Arial,Helvetica,sans-serif;">{{DUE_DATE}}</span></li>
+      <li><strong>Days Past Due</strong>: <span style="font-size:11pt; font-family:Arial,Helvetica,sans-serif; color:#cc0000;"><strong>{{DAYS_PAST_DUE}} days</strong></span></li>
+      <li><strong>Nabis Account Manager</strong>: <span style="font-size:11pt; font-family:Arial,Helvetica,sans-serif;">{{NABIS_AM_NAME}} - {{NABIS_AM_PHONE}}</span></li>
+      <li><strong>Amount Due</strong>: <span style="font-size:11pt; font-family:Arial,Helvetica,sans-serif; color:#cc0000;"><strong>{{AMOUNT}}</strong></span></li>
+    </ul>
+
+    <br>
+
+    <!-- ATTACHMENT REFERENCE -->
+    <div style="font-family:Arial,Helvetica,sans-serif;">
+      <strong>Attached is the Nabis ACH payment form (PDF) to facilitate your payment.</strong>
+    </div>
+
+    <br>
+
+    <!-- ACCOUNT HOLD STATEMENT (ACTIVE - not potential) -->
+    <div style="font-family:Arial,Helvetica,sans-serif;">
+      <strong>Please be advised that your account has been flagged and future orders may not be processed until the outstanding balance is resolved.</strong> Additionally, if payment is not received by <strong>{{FINAL_PAYMENT_DEADLINE}}</strong>, we will have no choice but to refer this matter for further collection action.
+    </div>
+
+    <br>
+
+    <!-- PAYMENT INSTRUCTIONS -->
+    <div style="font-family:Arial,Helvetica,sans-serif;">
+      Payment can be submitted immediately through Nabis. Your Nabis account manager is CC'd on this email and can assist with processing. If you require an invoice copy or Bill of Lading for your records, please reply to this email and we will provide it promptly.
+    </div>
+
+    <br>
+
+    <!-- FINAL CTA - DIRECT AND UNAMBIGUOUS -->
+    <div style="font-family:Arial,Helvetica,sans-serif;">
+      <strong>Payment of {{AMOUNT}} is required immediately.</strong> If there is a legitimate dispute or issue preventing payment, please contact us within 48 hours so we can work toward a resolution before further action is taken.
+    </div>
+
+    <br>
+
+    <!-- CLOSING - FIRM BUT PRESERVES RELATIONSHIP -->
+    <div style="font-family:Arial,Helvetica,sans-serif;">
+      We sincerely hope to resolve this matter quickly and continue our business relationship. Your prompt attention is essential.
+    </div>
+
+    <br>
+
+    <!-- SIGN-OFF -->
+    <div style="font-family:Arial,Helvetica,sans-serif;">
+      Regards,
+    </div>
+
+    <br>
+
+    <!-- SIGNATURE BLOCK -->
+    <div dir="ltr" class="gmail_signature" data-smartmail="gmail_signature">
+      <div dir="ltr">
+        <div>
+          <div dir="ltr">
+            <div dir="ltr">
+              <b style="font-family:Arial,Helvetica,sans-serif;">{{SENDER_NAME}}</b><br>
+              <span style="font-family:Arial,Helvetica,sans-serif;">PICC Platform</span><br>
+              <span style="font-family:Arial,Helvetica,sans-serif;">{{SENDER_TITLE}}</span><br>
+              <span style="font-family:Arial,Helvetica,sans-serif;">171 East 2nd St.</span><br>
+              <span style="font-family:Arial,Helvetica,sans-serif;">Huntington Station, NY 11746</span><br>
+              {{SENDER_PHONE_LINE}}
+              <br>
+              <i style="font-family:Arial,Helvetica,sans-serif;">"Where innovation meets inhalation, PICC the perfect pre-roll."</i><br>
+              <span style="font-family:Arial,Helvetica,sans-serif;">IG: <a href="https://www.instagram.com/piccplatform/" target="_blank" style="color:#1155cc;">@piccplatform</a></span><br>
+              <span style="font-family:Arial,Helvetica,sans-serif;"><a href="https://piccnewyork.notion.site/PICC-NY-WHOLESALE-265a86d9999880cb9e71d4091d21e8d5" target="_blank" style="color:#1155cc;">PICC NY Wholesale</a></span><br>
+              <br>
+              <span style="font-family:Arial,Helvetica,sans-serif;"><a href="https://www.piccplatform.com/" target="_blank" style="color:#1155cc;">www.piccplatform.com</a></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <br>
+
+    <!-- CONFIDENTIALITY NOTICE -->
+    <div style="font-family:Arial,Helvetica,sans-serif; font-size:8pt; color:#666666;">
+      Email Confidentiality Notice: This e-mail and any files transmitted with it are confidential and are intended solely for the use of the individual or entity to which they are addressed. The authorized recipient of this information is prohibited from disclosing this information to any other party unless authorized. If you are not the intended recipient of this e-mail please note that you have received this e-mail in error and any use, dissemination, forwarding, printing or copying of this e-mail is strictly prohibited. If you have received this e-mail in error, please immediately contact the sender of this message.
+    </div>
+
+  </div>
+</body>
+</html>

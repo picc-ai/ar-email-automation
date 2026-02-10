@@ -1,0 +1,242 @@
+# =============================================================================
+# AR Email Automation -- Configuration
+# =============================================================================
+# Edit this file to change behavior without touching Python code.
+# Any value omitted here falls back to the default defined in src/config.py.
+# =============================================================================
+
+
+# -----------------------------------------------------------------------------
+# 1. TIER BOUNDARIES
+#    days past due ranges that determine which template and tone to use.
+#    min_days/max_days are inclusive.  Negative values = days BEFORE due date.
+# -----------------------------------------------------------------------------
+tiers:
+  T1:
+    name: "T1"
+    min_days: -3
+    max_days: 3
+    label: "Coming Due"
+    template_file: "coming_due.html"
+
+  T2:
+    name: "T2"
+    min_days: 4
+    max_days: 29
+    label: "Overdue"
+    template_file: "overdue.html"
+
+  T3:
+    name: "T3"
+    min_days: 30
+    max_days: 39
+    label: "30+ Days Past Due"
+    template_file: "past_due_30.html"
+
+  T4:
+    name: "T4"
+    min_days: 40
+    max_days: 49
+    label: "40+ Days Past Due"
+    template_file: "past_due_40.html"
+
+  T5:
+    name: "T5"
+    min_days: 50
+    max_days: 999
+    label: "50+ Days Past Due"
+    template_file: "past_due_50.html"
+    sender_override: "mario@piccplatform.com"   # management takes over at T5
+
+
+# -----------------------------------------------------------------------------
+# 2. CC / BCC RULES
+#    base_cc is added to EVERY outgoing AR email.
+#    The assigned sales rep for each retailer is added automatically from the
+#    contact sheet -- you do not need to list reps here.
+#    tier_extra_cc adds additional recipients at specific tiers.
+# -----------------------------------------------------------------------------
+cc_rules:
+  base_cc:
+    - "ny.ar@nabis.com"
+    - "martinm@piccplatform.com"
+    - "mario@piccplatform.com"
+    - "laura@piccplatform.com"
+
+  tier_extra_cc:
+    T1: []
+    T2: []
+    T3: []
+    T4: []
+    T5: []          # add emails here if T5 needs extra stakeholders
+
+  bcc: []           # BCC is not used in the current workflow
+
+
+# -----------------------------------------------------------------------------
+# 3. ATTACHMENT RULES
+#    ach_form is attached to all initial outreach emails.
+#    bol and invoice_pdf are only attached on request or at higher tiers.
+#    Values:  true = always attach,  false = never,  "flag" = flag for review
+# -----------------------------------------------------------------------------
+attachment_rules:
+  ach_form_path: "data/Nabis_ACH_Payment_Form.pdf"
+
+  tier_attachments:
+    T1:
+      ach_form: true
+      bol: false
+      invoice_pdf: false
+    T2:
+      ach_form: true
+      bol: false
+      invoice_pdf: false
+    T3:
+      ach_form: true
+      bol: false
+      invoice_pdf: false
+    T4:
+      ach_form: true
+      bol: "flag"           # human decides whether to include BOL
+      invoice_pdf: "flag"
+    T5:
+      ach_form: true
+      bol: "flag"
+      invoice_pdf: "flag"
+
+
+# -----------------------------------------------------------------------------
+# 4. SMTP SETTINGS
+#    Placeholder for future use.  Phase 1 uses Gmail API directly.
+#    Credentials should come from environment variables, not this file.
+#    Set SMTP_USERNAME and SMTP_PASSWORD in your environment or .env file.
+# -----------------------------------------------------------------------------
+smtp:
+  host: "smtp.gmail.com"
+  port: 587
+  use_tls: true
+  username: ""    # override with env var SMTP_USERNAME
+  password: ""    # override with env var SMTP_PASSWORD
+
+
+# -----------------------------------------------------------------------------
+# 5. TEMPLATE PATHS
+#    Directory containing the HTML Jinja2 email templates.
+#    Relative to the project root (ar-email-automation/).
+# -----------------------------------------------------------------------------
+template_paths:
+  template_dir: "templates"
+
+
+# -----------------------------------------------------------------------------
+# 6. SENDER INFO
+#    Default FROM identity for outgoing AR emails.
+# -----------------------------------------------------------------------------
+sender:
+  name: "PICC Accounts Receivable"
+  email: "laura@piccplatform.com"
+  title: "Accounts Receivable Department"
+  company: "PICC Platform"
+
+# Sender used when management escalation kicks in (T5+).
+escalation_sender:
+  name: "Mario Serrano"
+  email: "mario@piccplatform.com"
+  title: "Regional Account Manager"
+  phone: "702.592.5673"
+  company: "PICC Platform"
+
+
+# -----------------------------------------------------------------------------
+# 7. SIGNATURE BLOCK
+#    Appended to every outgoing email.
+# -----------------------------------------------------------------------------
+signature:
+  sender_name: "PICC Accounts Receivable"
+  company: "PICC Platform"
+  title: "Accounts Receivable Department"
+  address_line1: "171 East 2nd St."
+  address_line2: "Huntington Station, NY 11746"
+  tagline: "Where innovation meets inhalation, PICC the perfect pre-roll."
+  instagram: "@piccplatform"
+  website_wholesale: "www.piccnewyork.com"
+  website_corporate: "www.piccplatform.com"
+  confidentiality_notice: >-
+    Email Confidentiality Notice: This e-mail and any files transmitted
+    with it are confidential and are intended solely for the use of the
+    individual or entity to which they are addressed. The authorized
+    recipient of this information is prohibited from disclosing this
+    information to any other party unless authorized. If you are not the
+    intended recipient of this e-mail please note that you have received
+    this e-mail in error and any use, dissemination, forwarding, printing
+    or copying of this e-mail is strictly prohibited. If you have received
+    this e-mail in error, please immediately contact the sender of this
+    message.
+
+
+# -----------------------------------------------------------------------------
+# 8. DATA FILE PATHS
+#    Relative to project root unless absolute.
+# -----------------------------------------------------------------------------
+data_files:
+  ar_overdue_xlsx: "data/NY Account Receivables_Overdue.xlsx"
+  emails_dir: "data/emails"
+  ach_form_pdf: "data/Nabis_ACH_Payment_Form.pdf"
+  nabis_api_base_url: ""        # future: Nabis API endpoint
+  google_sheet_id: ""           # future: Google Sheet for contact data
+
+
+# -----------------------------------------------------------------------------
+# 9. OUTPUT DIRECTORY
+#    Where generated email drafts and send logs are written.
+# -----------------------------------------------------------------------------
+output:
+  output_dir: "output/drafts"
+  sent_log_dir: "output/sent"
+  log_file: "output/ar_automation.log"
+
+
+# -----------------------------------------------------------------------------
+# 10. FUZZY MATCH THRESHOLD
+#     For matching retailer names across systems (Nabis, Sheets, etc.).
+#     Score is 0-100 (fuzzywuzzy ratio).  82 is a good default that catches
+#     minor spelling variations without false positives.
+# -----------------------------------------------------------------------------
+matching:
+  fuzzy_threshold: 82
+  exact_match_fields:
+    - "license_number"
+    - "invoice_number"
+
+
+# -----------------------------------------------------------------------------
+# 11. SUBJECT LINE FORMULA
+# -----------------------------------------------------------------------------
+subject_line:
+  single_template: "PICC - {retailer_name} - Nabis Invoice {invoice_number} - {tier_label}"
+  multi_template: "PICC - {retailer_name} - Nabis Invoices {invoice_numbers} - {tier_label}"
+  multi_join: " & "
+
+
+# -----------------------------------------------------------------------------
+# 12. HUMAN REVIEW FLAGS
+#     Conditions that force an email into the human review queue instead of
+#     auto-sending.
+# -----------------------------------------------------------------------------
+review_flags:
+  multi_invoice_per_retailer: true
+  invoice_has_credits: true
+  contact_previously_bounced: true
+  tier_gte_management_escalation: "T5"
+  retailer_has_open_dispute: true
+  days_past_due_exit_threshold: 90    # beyond this, flag for phone/legal
+
+
+# -----------------------------------------------------------------------------
+# 13. SCHEDULE
+#     When the batch email generation runs.
+# -----------------------------------------------------------------------------
+schedule:
+  run_day: "Wednesday"
+  run_time: "07:00"
+  timezone: "America/New_York"
