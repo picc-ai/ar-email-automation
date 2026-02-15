@@ -10,6 +10,10 @@ Covers:
 - Primary contact selection (AP preference)
 - Resolution report formatting
 - Real data validation with XLSX
+- Contact SOP priority chain (Wave 2)
+- CC list assembly
+- Source trust filtering (Nabis vs Revelry)
+- Brand AR Summary fallback
 """
 
 from dataclasses import dataclass
@@ -19,17 +23,22 @@ from types import SimpleNamespace
 import pytest
 
 from src.contact_resolver import (
+    ALWAYS_CC,
     CONFIDENCE_EXACT_LICENSE_EXACT_NAME,
     CONFIDENCE_EXACT_LICENSE_FUZZY_NAME,
     CONFIDENCE_EXACT_LICENSE_ONLY,
     CONFIDENCE_FUZZY_NAME_ONLY,
     CONFIDENCE_NO_MATCH,
     FUZZY_THRESHOLD,
+    NO_CONTACT_PLACEHOLDER,
+    REP_EMAIL_MAP,
+    SOURCE_TRUST,
     ContactResolver,
     MatchResult,
     MatchTier,
     ResolutionReport,
     _compute_similarity,
+    _get_source_trust,
     _normalize_for_fuzzy,
     _normalize_name,
     format_resolution_report,
@@ -68,6 +77,21 @@ def _make_invoice(**overrides):
         "total_due": 1510.00,
         "paid": False,
         "status": None,
+        "sales_rep": "Ben",
+    }
+    defaults.update(overrides)
+    return SimpleNamespace(**defaults)
+
+
+def _make_brand_ar_contact(**overrides):
+    """Create a mock Brand AR Summary contact."""
+    defaults = {
+        "retailer_name": "Test Dispensary",
+        "poc_emails": ["test@dispensary.com"],
+        "poc_phones": ["John - (555) 555-1234"],
+        "retailer_type": "Good",
+        "responsiveness": "Responsive",
+        "notes": "",
     }
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
@@ -630,3 +654,403 @@ class TestRealDataContactResolution:
             assert contact.email != "" or contact.has_email, (
                 f"No email for '{store}'"
             )
+
+
+# ============================================================================
+# Source Trust Hierarchy
+# ============================================================================
+
+class TestSourceTrust:
+    """Test source trust level classification for associated contacts."""
+
+    def test_nabis_import_is_high(self):
+        assert _get_source_trust("Nabis import") == "high"
+
+    def test_nabis_poc_is_high(self):
+        assert _get_source_trust("Nabis POC") == "high"
+
+    def test_crm_contact_is_high(self):
+        assert _get_source_trust("CRM Contact") == "high"
+
+    def test_nabis_order_poc_is_high(self):
+        assert _get_source_trust("Nabis Order, Point of Contact") == "high"
+
+    def test_revelry_is_low(self):
+        assert _get_source_trust("Revelry buyers list") == "low"
+        assert _get_source_trust("revelry") == "low"
+
+    def test_unknown_source_is_medium(self):
+        assert _get_source_trust("Unknown Source") == "medium"
+
+    def test_empty_source_is_medium(self):
+        assert _get_source_trust("") == "medium"
+
+    def test_case_insensitive(self):
+        assert _get_source_trust("NABIS IMPORT") == "high"
+        assert _get_source_trust("REVELRY") == "low"
+
+
+# ============================================================================
+# Contact SOP Priority Chain
+# ============================================================================
+
+class TestContactSOPPriorityChain:
+    """Test the meeting-defined SOP priority chain for TO recipients."""
+
+    def test_primary_contact_only(self):
+        """When only a primary contact exists, TO should contain just that email."""
+        contacts = [_make_contact(
+            retailer_name="Test Store",
+            email="primary@test.com",
+            all_emails=["primary@test.com"],
+            all_contacts=[{"name": "Jane", "title": "Owner"}],
+        )]
+        resolver = ContactResolver(contacts)
+        invoice = _make_invoice(location="Test Store")
+        result = resolver.match_invoice(invoice)
+        result = resolver.resolve_to_recipients(result)
+
+        assert "primary@test.com" in result.to_emails
+        assert len(result.resolution_chain) > 0
+        assert result.contact_source == "managers_sheet"
+
+    def test_primary_plus_billing(self):
+        """When both primary and billing contacts exist, TO should contain both."""
+        contacts = [_make_contact(
+            retailer_name="Test Store",
+            email="primary@test.com",
+            all_emails=["primary@test.com", "ap@test.com"],
+            all_contacts=[
+                {"name": "Jane", "title": "Owner"},
+                {"name": "Bob", "title": "AP", "email": "ap@test.com"},
+            ],
+        )]
+        resolver = ContactResolver(contacts)
+        invoice = _make_invoice(location="Test Store")
+        result = resolver.match_invoice(invoice)
+        result = resolver.resolve_to_recipients(result)
+
+        assert "primary@test.com" in result.to_emails
+        assert "ap@test.com" in result.to_emails
+
+    def test_billing_email_pattern_detected(self):
+        """Emails with ap@/accounting@ prefixes should be identified as billing."""
+        contacts = [_make_contact(
+            retailer_name="Test Store",
+            email="owner@test.com",
+            all_emails=["owner@test.com", "accounting@test.com"],
+            all_contacts=[{"name": "Jane", "title": "Owner"}],
+        )]
+        resolver = ContactResolver(contacts)
+        invoice = _make_invoice(location="Test Store")
+        result = resolver.match_invoice(invoice)
+        result = resolver.resolve_to_recipients(result)
+
+        assert "owner@test.com" in result.to_emails
+        assert "accounting@test.com" in result.to_emails
+
+    def test_no_contacts_found_empty_to(self):
+        """When no contact is found at all, to_emails should be empty."""
+        resolver = ContactResolver([])
+        invoice = _make_invoice(location="Unknown Store")
+        result = resolver.match_invoice(invoice)
+        result = resolver.resolve_to_recipients(result)
+
+        assert result.to_emails == []
+        assert result.contact_source == "manual"
+        assert any("No contact found" in s for s in result.resolution_chain)
+
+    def test_brand_ar_summary_fallback(self):
+        """When Managers sheet has no match, should fall back to Brand AR Summary."""
+        brand_ar = {
+            "Fallback Dispensary": _make_brand_ar_contact(
+                retailer_name="Fallback Dispensary",
+                poc_emails=["fallback@dispensary.com"],
+            ),
+        }
+        resolver = ContactResolver([], brand_ar_contacts=brand_ar)
+        invoice = _make_invoice(location="Fallback Dispensary")
+        result = resolver.match_invoice(invoice)
+        result = resolver.resolve_to_recipients(result)
+
+        assert "fallback@dispensary.com" in result.to_emails
+        assert result.contact_source == "brand_ar_summary"
+
+    def test_brand_ar_summary_fuzzy_match(self):
+        """Brand AR Summary should also support fuzzy matching."""
+        brand_ar = {
+            "Fallback Dispensary.": _make_brand_ar_contact(
+                retailer_name="Fallback Dispensary.",
+                poc_emails=["fallback@dispensary.com"],
+            ),
+        }
+        resolver = ContactResolver([], brand_ar_contacts=brand_ar)
+        invoice = _make_invoice(location="Fallback Dispensary")
+        result = resolver.match_invoice(invoice)
+        result = resolver.resolve_to_recipients(result)
+
+        assert "fallback@dispensary.com" in result.to_emails
+        assert result.contact_source == "brand_ar_summary"
+
+    def test_managers_sheet_preferred_over_brand_ar(self):
+        """When both Managers and Brand AR have the store, prefer Managers."""
+        contacts = [_make_contact(
+            retailer_name="Dual Store",
+            email="managers@dual.com",
+            all_emails=["managers@dual.com"],
+        )]
+        brand_ar = {
+            "Dual Store": _make_brand_ar_contact(
+                retailer_name="Dual Store",
+                poc_emails=["brandar@dual.com"],
+            ),
+        }
+        resolver = ContactResolver(contacts, brand_ar_contacts=brand_ar)
+        invoice = _make_invoice(location="Dual Store")
+        result = resolver.match_invoice(invoice)
+        result = resolver.resolve_to_recipients(result)
+
+        assert "managers@dual.com" in result.to_emails
+        assert "brandar@dual.com" not in result.to_emails
+        assert result.contact_source == "managers_sheet"
+
+    def test_resolution_chain_audit_trail(self):
+        """The resolution_chain should provide a clear audit trail."""
+        contacts = [_make_contact(
+            retailer_name="Audited Store",
+            email="audit@store.com",
+            all_emails=["audit@store.com"],
+        )]
+        resolver = ContactResolver(contacts)
+        invoice = _make_invoice(location="Audited Store")
+        result = resolver.match_invoice(invoice)
+        result = resolver.resolve_to_recipients(result)
+
+        assert len(result.resolution_chain) > 0
+        # Should mention Managers sheet match
+        assert any("Managers sheet" in s for s in result.resolution_chain)
+
+
+# ============================================================================
+# Source-based Contact Filtering
+# ============================================================================
+
+class TestSourceFiltering:
+    """Test that Revelry-sourced contacts are deprioritized."""
+
+    def test_nabis_preferred_over_revelry(self):
+        """When associated contacts have both Nabis and Revelry sources,
+        the Nabis-sourced contact should be used."""
+        contacts = [_make_contact(
+            retailer_name="Mixed Source Store",
+            email="",  # no primary email to force associated contacts path
+            all_emails=[],
+            all_contacts=[
+                {"name": "Rev Contact", "title": "", "email": "rev@store.com",
+                 "source": "Revelry buyers list"},
+                {"name": "Nabis Contact", "title": "", "email": "nabis@store.com",
+                 "source": "Nabis import"},
+            ],
+        )]
+        resolver = ContactResolver(contacts)
+        invoice = _make_invoice(location="Mixed Source Store")
+        result = resolver.match_invoice(invoice)
+        result = resolver.resolve_to_recipients(result)
+
+        # Nabis-sourced should be preferred
+        assert "nabis@store.com" in result.to_emails
+        # Revelry should not be included when better sources exist
+        assert "rev@store.com" not in result.to_emails
+
+    def test_revelry_only_contacts_used_as_fallback(self):
+        """When only Revelry-sourced contacts are available, they should still be used."""
+        contacts = [_make_contact(
+            retailer_name="Revelry Only Store",
+            email="",
+            all_emails=[],
+            all_contacts=[
+                {"name": "Rev Contact", "title": "", "email": "rev@store.com",
+                 "source": "Revelry buyers list"},
+            ],
+        )]
+        resolver = ContactResolver(contacts)
+        invoice = _make_invoice(location="Revelry Only Store")
+        result = resolver.match_invoice(invoice)
+        result = resolver.resolve_to_recipients(result)
+
+        # Should use Revelry as fallback
+        assert "rev@store.com" in result.to_emails
+        # But resolution chain should note it's low trust
+        assert any("Revelry" in s or "low trust" in s
+                    for s in result.resolution_chain)
+
+
+# ============================================================================
+# CC List Assembly
+# ============================================================================
+
+class TestCCListAssembly:
+    """Test CC list building per the meeting SOP."""
+
+    def test_base_cc_always_included(self):
+        """All 4 hardcoded base CC addresses should always be present."""
+        resolver = ContactResolver([])
+        invoice = _make_invoice(sales_rep="")
+        cc = resolver.build_cc_list(invoice)
+
+        assert "ny.ar@nabis.com" in cc
+        assert "martinm@piccplatform.com" in cc
+        assert "mario@piccplatform.com" in cc
+        assert "laura@piccplatform.com" in cc
+
+    def test_sales_rep_email_added(self):
+        """The sales rep email should be dynamically added to CC."""
+        resolver = ContactResolver([])
+        invoice = _make_invoice(sales_rep="Ben")
+        cc = resolver.build_cc_list(invoice)
+
+        assert "b.rosenthal@piccplatform.com" in cc
+
+    def test_unknown_rep_not_added(self):
+        """An unknown rep name should not add any extra CC."""
+        resolver = ContactResolver([])
+        invoice = _make_invoice(sales_rep="Unknown Person")
+        cc = resolver.build_cc_list(invoice)
+
+        # Should only have the 4 base CCs
+        assert len(cc) == 4
+
+    def test_no_duplicate_cc(self):
+        """CC list should not contain duplicates."""
+        resolver = ContactResolver([])
+        # Mario is both a base CC and a rep name
+        invoice = _make_invoice(sales_rep="Mario")
+        cc = resolver.build_cc_list(invoice)
+
+        # mario@piccplatform.com should appear only once
+        mario_count = sum(1 for addr in cc if "mario@piccplatform" in addr.lower())
+        assert mario_count == 1
+
+    def test_extra_cc_added(self):
+        """Extra CC addresses should be appended."""
+        resolver = ContactResolver([])
+        invoice = _make_invoice(sales_rep="Ben")
+        cc = resolver.build_cc_list(invoice, extra_cc=["extra@example.com"])
+
+        assert "extra@example.com" in cc
+        assert "b.rosenthal@piccplatform.com" in cc
+
+    def test_placeholder_tokens_removed(self):
+        """Any unresolved {placeholder} tokens should be stripped."""
+        resolver = ContactResolver([])
+        invoice = _make_invoice(sales_rep="")
+        cc = resolver.build_cc_list(invoice, extra_cc=["{rep_email}"])
+
+        assert all("{" not in addr for addr in cc)
+
+    def test_custom_rep_email_map(self):
+        """A custom rep email map should override the default."""
+        custom_map = {"TestRep": "testrep@company.com"}
+        resolver = ContactResolver([], rep_email_map=custom_map)
+        invoice = _make_invoice(sales_rep="TestRep")
+        cc = resolver.build_cc_list(invoice)
+
+        assert "testrep@company.com" in cc
+
+
+# ============================================================================
+# MatchResult Properties
+# ============================================================================
+
+class TestMatchResultProperties:
+    """Test the new MatchResult properties."""
+
+    def test_contact_emails_from_to_emails(self):
+        """contact_emails should return to_emails if populated."""
+        result = MatchResult(
+            invoice_order_nos=[1],
+            invoice_location="Test",
+            to_emails=["a@b.com", "c@d.com"],
+        )
+        assert result.contact_emails == ["a@b.com", "c@d.com"]
+
+    def test_contact_emails_from_contact_all_emails(self):
+        """contact_emails should fall back to contact.all_emails."""
+        contact = _make_contact(all_emails=["x@y.com"])
+        result = MatchResult(
+            invoice_order_nos=[1],
+            invoice_location="Test",
+            contact=contact,
+        )
+        assert "x@y.com" in result.contact_emails
+
+    def test_contact_emails_from_contact_email(self):
+        """contact_emails should fall back to contact.email."""
+        contact = SimpleNamespace(email="single@email.com", all_emails=[])
+        result = MatchResult(
+            invoice_order_nos=[1],
+            invoice_location="Test",
+            contact=contact,
+        )
+        assert result.contact_emails == ["single@email.com"]
+
+    def test_contact_emails_no_contact(self):
+        """contact_emails should return empty list when no contact."""
+        result = MatchResult(
+            invoice_order_nos=[1],
+            invoice_location="Test",
+        )
+        assert result.contact_emails == []
+
+    def test_primary_contact_name(self):
+        """primary_contact_name should return the contact's name."""
+        contact = _make_contact(contact_name="Emily Stratakos")
+        result = MatchResult(
+            invoice_order_nos=[1],
+            invoice_location="Test",
+            contact=contact,
+        )
+        assert result.primary_contact_name == "Emily Stratakos"
+
+    def test_primary_contact_name_no_contact(self):
+        """primary_contact_name should return empty string when no contact."""
+        result = MatchResult(
+            invoice_order_nos=[1],
+            invoice_location="Test",
+        )
+        assert result.primary_contact_name == ""
+
+
+# ============================================================================
+# Batch Resolution with SOP Chain
+# ============================================================================
+
+class TestBatchResolutionWithSOP:
+    """Test that batch resolution applies the SOP priority chain."""
+
+    def test_batch_populates_to_emails(self):
+        """Batch resolve() should populate to_emails on all results."""
+        contacts = [_make_contact(
+            retailer_name="Store A",
+            email="a@store.com",
+            all_emails=["a@store.com"],
+        )]
+        invoices = [_make_invoice(order_no=1, location="Store A")]
+
+        resolver = ContactResolver(contacts)
+        report = resolver.resolve(invoices)
+
+        assert len(report.matched) == 1
+        assert "a@store.com" in report.matched[0].to_emails
+        assert report.matched[0].contact_source == "managers_sheet"
+
+    def test_batch_unmatched_has_empty_to_emails(self):
+        """Unmatched results should have empty to_emails."""
+        invoices = [_make_invoice(order_no=1, location="Nonexistent Store")]
+
+        resolver = ContactResolver([])
+        report = resolver.resolve(invoices)
+
+        assert len(report.unmatched) == 1
+        assert report.unmatched[0].to_emails == []
+        assert report.unmatched[0].contact_source == "manual"

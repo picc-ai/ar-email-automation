@@ -21,7 +21,7 @@ import ssl
 import sys
 import zipfile
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, time as dt_time
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
@@ -82,7 +82,7 @@ except ImportError as e:
 try:
     from src.tier_classifier import (
         classify,
-        get_overdue_timeframe_description,
+        get_dynamic_subject_label,
         Tier as ClassifierTier,
         TIER_METADATA,
     )
@@ -116,13 +116,11 @@ PICC_LIGHT_GREEN = "#0a5c46"
 PICC_WHITE = "#ffffff"
 PICC_LIGHT_BG = "#f8f6f0"
 
-# Tier badge colors
+# Tier badge colors (3-tier system: Coming Due, Overdue, 30+ Days Past Due)
 TIER_COLORS = {
     "Coming Due":          {"bg": "#d4edda", "text": "#155724", "icon": ""},
     "Overdue":             {"bg": "#fff3cd", "text": "#856404", "icon": ""},
-    "30+ Days Past Due":   {"bg": "#ffeeba", "text": "#856404", "icon": ""},
-    "40+ Days Past Due":   {"bg": "#f5c6cb", "text": "#721c24", "icon": ""},
-    "50+ Days Past Due":   {"bg": "#f8d7da", "text": "#721c24", "icon": ""},
+    "30+ Days Past Due":   {"bg": "#f8d7da", "text": "#721c24", "icon": ""},
 }
 
 # Status badge colors
@@ -336,8 +334,35 @@ st.markdown(f"""
 # Session State Initialization
 # ---------------------------------------------------------------------------
 
+SETTINGS_FILE = PROJECT_ROOT / "data" / "settings.json"
+
+def _load_saved_settings() -> dict:
+    """Load persisted settings from JSON file on disk."""
+    if SETTINGS_FILE.exists():
+        try:
+            return json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return {}
+    return {}
+
+
+def _save_settings(settings: dict) -> bool:
+    """Save settings dict to JSON file on disk. Returns True on success."""
+    try:
+        SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        SETTINGS_FILE.write_text(
+            json.dumps(settings, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        return True
+    except OSError:
+        return False
+
+
 def init_session_state():
-    """Initialize all session state variables."""
+    """Initialize all session state variables, loading saved settings if available."""
+    saved = _load_saved_settings()
+
     defaults = {
         "queue": None,              # EmailQueue instance
         "load_result": None,        # LoadResult from data_loader
@@ -350,10 +375,13 @@ def init_session_state():
         "history": [],              # List of previously exported email dicts
         "upload_key": 0,            # Key for file uploader widget
         "gmail_app_password": "",   # Gmail App Password for SMTP sending
-        "sender_email": "laura@piccplatform.com",  # Sender email address
-        "sender_name": "",          # Sender display name (empty = "PICC Accounts Receivable")
+        "sender_email": saved.get("sender_email", "laura@piccplatform.com"),
+        "sender_name": saved.get("sender_name", ""),
         "smtp_configured": False,   # Whether SMTP creds are set
         "send_results": [],         # Results from last send batch
+        "custom_cc": saved.get("custom_cc", None),  # Persisted CC list (None = use config default)
+        "schedule_time": saved.get("schedule_time", "07:00"),  # Schedule send time
+        "schedule_timezone": saved.get("schedule_timezone", "PT"),  # Schedule timezone
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -434,6 +462,9 @@ def generate_eml(draft: EmailDraft) -> str:
     msg["From"] = st.session_state.get("sender_email", "laura@piccplatform.com")
     msg["To"] = ", ".join(draft.to) if draft.to else ""
     msg["Cc"] = ", ".join(draft.cc) if draft.cc else ""
+    eml_bcc = getattr(draft, "bcc", []) or []
+    if eml_bcc:
+        msg["Bcc"] = ", ".join(eml_bcc)
     msg["Subject"] = draft.subject
     msg["Date"] = datetime.now().strftime("%a, %d %b %Y %H:%M:%S +0000")
 
@@ -463,6 +494,9 @@ def _build_smtp_message(draft: EmailDraft, sender_email: str) -> MIMEMultipart:
     msg["From"] = sender_email
     msg["To"] = ", ".join(draft.to) if draft.to else ""
     msg["Cc"] = ", ".join(draft.cc) if draft.cc else ""
+    smtp_bcc = getattr(draft, "bcc", []) or []
+    if smtp_bcc:
+        msg["Bcc"] = ", ".join(smtp_bcc)
     msg["Subject"] = draft.subject
     msg["Date"] = datetime.now().strftime("%a, %d %b %Y %H:%M:%S +0000")
 
@@ -517,8 +551,8 @@ def send_email_smtp(
     try:
         msg = _build_smtp_message(draft, sender_email)
 
-        # All recipients (To + CC)
-        all_recipients = list(draft.to) + list(draft.cc)
+        # All recipients (To + CC + BCC)
+        all_recipients = list(draft.to) + list(draft.cc) + list(getattr(draft, "bcc", []) or [])
 
         context = ssl.create_default_context()
         with smtplib.SMTP("smtp.gmail.com", 587) as server:
@@ -846,12 +880,6 @@ def render_sidebar():
             key=f"xlsx_upload_{st.session_state.upload_key}",
         )
 
-        use_default = st.checkbox(
-            "Use default file",
-            value=True,
-            help="Use the default XLSX file from the data/ folder.",
-        )
-
         st.markdown("---")
 
         # Sender name -- who the email appears to come from
@@ -877,10 +905,8 @@ def render_sidebar():
             if uploaded_file is not None:
                 file_bytes = io.BytesIO(uploaded_file.read())
                 queue = load_data_from_xlsx(file_bytes=file_bytes)
-            elif use_default:
-                queue = load_data_from_xlsx()
             else:
-                st.warning("Please upload an XLSX file or check 'Use default file'.")
+                st.warning("Please upload an XLSX file first.")
                 queue = None
 
             if queue is not None:
@@ -1111,6 +1137,66 @@ def render_queue_page():
         if not smtp_ready:
             st.caption("Gmail not configured -- go to Settings")
 
+    # ---------------------------------------------------------------
+    # Schedule Send Time Picker
+    # ---------------------------------------------------------------
+    schedule_cols = st.columns([1, 1, 3])
+    with schedule_cols[0]:
+        default_time = dt_time(7, 0)  # 7:00 AM PT
+        scheduled_time = st.time_input(
+            "Schedule send time",
+            value=default_time,
+            help="Target send time (default: 7:00 AM PT = 10:00 AM ET). Callie schedules for 7 AM Pacific.",
+            key="schedule_time_picker",
+        )
+        st.session_state.schedule_time = scheduled_time.strftime("%H:%M")
+        # Apply scheduled time to all drafts in the queue
+        if queue is not None:
+            for draft in queue.drafts:
+                draft.scheduled_send_time = scheduled_time
+                draft.scheduled_timezone = st.session_state.get("schedule_timezone", "PT")
+    with schedule_cols[1]:
+        tz_option = st.selectbox(
+            "Timezone",
+            options=["PT (Pacific)", "ET (Eastern)", "CT (Central)", "MT (Mountain)"],
+            index=0,
+            key="schedule_tz_picker",
+            help="Callie schedules for 7 AM Pacific = 10 AM Eastern",
+        )
+        tz_label = tz_option.split(" ")[0]
+        st.session_state.schedule_timezone = tz_label
+        # Update timezone on drafts
+        if queue is not None:
+            for draft in queue.drafts:
+                draft.scheduled_timezone = tz_label
+    with schedule_cols[2]:
+        # Compute ET equivalent for display
+        et_hour = scheduled_time.hour + 3  # PT -> ET offset
+        et_min = scheduled_time.minute
+        if et_hour >= 24:
+            et_hour -= 24
+        et_time_val = dt_time(et_hour, et_min)
+        try:
+            pt_display = scheduled_time.strftime("%I:%M %p").lstrip("0")
+            et_display = et_time_val.strftime("%I:%M %p").lstrip("0")
+        except ValueError:
+            pt_display = str(scheduled_time)
+            et_display = str(et_time_val)
+
+        tz_label = st.session_state.schedule_timezone
+        st.markdown(
+            f'<div style="background: #e8f5e9; border-left: 4px solid #4caf50; '
+            f'padding: 0.75rem 1rem; border-radius: 4px; margin-top: 0.5rem;">'
+            f'<strong>Scheduled for: {pt_display} {tz_label}</strong>'
+            f'{"  (" + et_display + " ET)" if tz_label == "PT" else ""}<br>'
+            f'<span style="font-size: 0.85rem; color: #666;">'
+            f'Emails will be sent immediately when you click "Send via Gmail". '
+            f'To schedule-send, use Gmail\'s built-in schedule send feature, '
+            f'or run this tool at the target time.</span>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
     # Show send results if any
     if st.session_state.send_results:
         with st.expander("Last Send Results", expanded=True):
@@ -1166,11 +1252,20 @@ def render_queue_page():
             st.markdown(tier_badge_html(draft.tier.value), unsafe_allow_html=True)
 
         with row_cols[2]:
-            # Store name with flags
+            # Store name with flags and scheduled time
             store_display = f"**{draft.store_name}**"
             if draft.is_multi_invoice:
                 store_display += f" ({len(draft.invoices)} invoices)"
             st.markdown(store_display)
+            # Show scheduled send time under store name
+            if draft.scheduled_send_time is not None:
+                sched_display = draft.scheduled_time_display
+                if sched_display:
+                    st.markdown(
+                        f'<span style="font-size: 0.75rem; color: #4caf50;">'
+                        f'Send at: {sched_display}</span>',
+                        unsafe_allow_html=True,
+                    )
             if flags:
                 flag_html = " ".join(
                     f'<span class="flag-badge">{f}</span>' for f in flags
@@ -1254,7 +1349,7 @@ def render_preview_page():
     """, unsafe_allow_html=True)
 
     # Status bar
-    info_cols = st.columns(4)
+    info_cols = st.columns(5)
     with info_cols[0]:
         st.markdown(f"**Status:** {status_badge_html(draft.status.value)}", unsafe_allow_html=True)
     with info_cols[1]:
@@ -1262,6 +1357,17 @@ def render_preview_page():
     with info_cols[2]:
         st.markdown(f"**Days Past Due:** {max_days}")
     with info_cols[3]:
+        # Scheduled send time
+        sched_display = draft.scheduled_time_display if draft.scheduled_send_time else ""
+        if sched_display:
+            st.markdown(
+                f'**Send at:** <span style="color: #4caf50; font-weight: 600;">'
+                f'{sched_display}</span>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown("**Send at:** Not scheduled")
+    with info_cols[4]:
         if flags:
             flag_html = " ".join(f'<span class="flag-badge">{f}</span>' for f in flags)
             st.markdown(f"**Flags:** {flag_html}", unsafe_allow_html=True)
@@ -1283,17 +1389,26 @@ def render_preview_page():
             st.markdown("**From:**")
             st.markdown("**To:**")
             st.markdown("**CC:**")
+            st.markdown("**BCC:**")
             st.markdown("**Subject:**")
             st.markdown("**Attach:**")
+            st.markdown("**Send at:**")
 
         with h_cols[1]:
-            st.markdown(f"Laura <{st.session_state.sender_email}>")
+            sender_display = st.session_state.sender_name or "PICC Accounts Receivable"
+            st.markdown(f"{sender_display} <{st.session_state.sender_email}>")
             to_str = ", ".join(draft.to) if draft.to else "(no contact found)"
             st.markdown(to_str)
             cc_str = ", ".join(draft.cc) if draft.cc else "(none)"
             st.markdown(cc_str)
+            bcc_list = getattr(draft, "bcc", []) or []
+            bcc_str = ", ".join(bcc_list) if bcc_list else "(none)"
+            st.markdown(bcc_str)
             st.markdown(f"**{draft.subject}**")
             st.markdown("Nabis ACH Payment Form.pdf")
+            # Scheduled send time
+            sched_display = draft.scheduled_time_display if draft.scheduled_send_time else "Not scheduled"
+            st.markdown(f":green[{sched_display}]" if draft.scheduled_send_time else sched_display)
 
     # ---------------------------------------------------------------
     # Invoice Details (collapsible, above the email body)
@@ -1423,6 +1538,12 @@ def render_preview_page():
                 key=f"edit_cc_q_{idx}",
                 help="CC email addresses, separated by commas",
             )
+            new_bcc_q = st.text_input(
+                "BCC (comma-separated)",
+                value=", ".join(getattr(draft, "bcc", []) or []),
+                key=f"edit_bcc_q_{idx}",
+                help="BCC email addresses, separated by commas",
+            )
             new_subject_q = st.text_input(
                 "Subject",
                 value=draft.subject,
@@ -1434,6 +1555,7 @@ def render_preview_page():
                 if st.button("Save Changes", type="primary", key=f"save_q_{idx}"):
                     draft.to = [e.strip() for e in new_to_q.split(",") if e.strip()]
                     draft.cc = [e.strip() for e in new_cc_q.split(",") if e.strip()]
+                    draft.bcc = [e.strip() for e in new_bcc_q.split(",") if e.strip()]
                     draft.subject = new_subject_q
                     st.session_state[f"editing_{idx}"] = False
                     st.success("Changes saved!")
@@ -1484,6 +1606,12 @@ def render_preview_page():
                 value=", ".join(draft.cc),
                 key=f"edit_cc_h_{idx}",
             )
+            new_bcc_h = st.text_input(
+                "BCC (comma-separated)",
+                value=", ".join(getattr(draft, "bcc", []) or []),
+                key=f"edit_bcc_h_{idx}",
+                help="BCC email addresses, separated by commas",
+            )
             new_subject_h = st.text_input(
                 "Subject",
                 value=draft.subject,
@@ -1501,6 +1629,7 @@ def render_preview_page():
                 if st.button("Save Changes", type="primary", key=f"save_h_{idx}"):
                     draft.to = [e.strip() for e in new_to_h.split(",") if e.strip()]
                     draft.cc = [e.strip() for e in new_cc_h.split(",") if e.strip()]
+                    draft.bcc = [e.strip() for e in new_bcc_h.split(",") if e.strip()]
                     draft.subject = new_subject_h
                     draft.body_html = new_body_h
                     st.session_state[f"editing_{idx}"] = False
@@ -1638,7 +1767,7 @@ def _send_approved_emails(queue: EmailQueue):
         if success:
             draft.status = EmailStatus.SENT
             # Add to history
-            st.session_state.history.append({
+            history_entry = {
                 "store_name": draft.store_name,
                 "tier": draft.tier.value,
                 "amount": draft.total_amount_formatted,
@@ -1647,7 +1776,10 @@ def _send_approved_emails(queue: EmailQueue):
                 "exported_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
                 "filename": "(sent via Gmail)",
                 "method": "gmail_smtp",
-            })
+            }
+            if draft.scheduled_send_time is not None:
+                history_entry["scheduled_time"] = draft.scheduled_time_display
+            st.session_state.history.append(history_entry)
 
     progress_bar.empty()
 
@@ -1881,19 +2013,22 @@ def render_settings_page():
     # ---------------------------------------------------------------
     st.markdown("#### Always CC Recipients")
 
-    default_cc = (
-        cfg.cc_rules.base_cc if cfg
-        else [
+    # Use saved custom CC if available, otherwise config defaults
+    if st.session_state.get("custom_cc") is not None:
+        current_cc = st.session_state["custom_cc"]
+    elif cfg:
+        current_cc = cfg.cc_rules.base_cc
+    else:
+        current_cc = [
             "ny.ar@nabis.com",
             "martinm@piccplatform.com",
             "mario@piccplatform.com",
             "laura@piccplatform.com",
         ]
-    )
 
     cc_text = st.text_area(
         "CC List (one email per line)",
-        value="\n".join(default_cc),
+        value="\n".join(current_cc),
         height=120,
     )
 
@@ -1903,6 +2038,8 @@ def render_settings_page():
     # Tier Boundaries
     # ---------------------------------------------------------------
     st.markdown("#### Tier Boundaries (Days Past Due)")
+
+    tier_label_options = ["Coming Due", "Overdue", "30+ Days Past Due"]
 
     if cfg:
         for tier_key, tier_cfg in cfg.tiers.items():
@@ -1927,13 +2064,52 @@ def render_settings_page():
                     key=f"tier_max_{tier_key}",
                 )
             with t_cols[3]:
-                st.text_input(
+                # Use dropdown instead of text input for tier labels
+                current_label = tier_cfg.label
+                label_idx = (
+                    tier_label_options.index(current_label)
+                    if current_label in tier_label_options
+                    else 0
+                )
+                st.selectbox(
                     "Label",
-                    value=tier_cfg.label,
+                    options=tier_label_options,
+                    index=label_idx,
                     key=f"tier_label_{tier_key}",
                 )
     else:
         st.info("Config module not loaded. Default tier boundaries apply.")
+
+    st.markdown("---")
+
+    # ---------------------------------------------------------------
+    # Save Settings Button
+    # ---------------------------------------------------------------
+    save_cols = st.columns([1, 3])
+    with save_cols[0]:
+        if st.button("Save Settings", type="primary", use_container_width=True):
+            # Persist CC list
+            parsed_cc = [e.strip() for e in cc_text.split("\n") if e.strip()]
+            st.session_state["custom_cc"] = parsed_cc
+
+            # Build settings dict
+            settings_to_save = {
+                "sender_name": st.session_state.sender_name,
+                "sender_email": st.session_state.sender_email,
+                "custom_cc": parsed_cc,
+                "schedule_time": st.session_state.get("schedule_time", "07:00"),
+                "schedule_timezone": st.session_state.get("schedule_timezone", "PT"),
+            }
+
+            if _save_settings(settings_to_save):
+                st.success("Settings saved to disk! They will persist across sessions.")
+            else:
+                st.error("Failed to save settings to disk. Settings are saved for this session only.")
+    with save_cols[1]:
+        st.caption(
+            "Saves sender name, sender email, CC list, and schedule preferences "
+            "to data/settings.json so they persist across sessions."
+        )
 
     st.markdown("---")
 

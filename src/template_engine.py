@@ -58,7 +58,6 @@ from .models import (
 )
 from .tier_classifier import (
     classify,
-    get_overdue_timeframe_description,
     OCM_REPORTING_DAY,
 )
 
@@ -76,9 +75,8 @@ _DATE_FORMAT = "%b %d, %Y"
 # OCM reporting deadline in days
 _OCM_DEADLINE_DAYS = OCM_REPORTING_DAY  # 52
 
-# Business days for deadline calculations
-_T4_DEADLINE_BIZ_DAYS = 7
-_T5_DEADLINE_BIZ_DAYS = 5
+# Business days for payment deadline calculation (30+ tier)
+_PAST_DUE_DEADLINE_BIZ_DAYS = 7
 
 
 # ---------------------------------------------------------------------------
@@ -134,23 +132,6 @@ def format_currency(amount: float | None) -> str:
 # Helper: OCM Phrase Generators
 # ---------------------------------------------------------------------------
 
-def _get_ocm_status_phrase(days_past_due: int) -> str:
-    """Generate the OCM status phrase for T5 (50+ days) emails.
-
-    Returns a phrase fragment starting with 'is...' or 'has...' that
-    completes the sentence 'Your account {phrase}'.
-    """
-    if days_past_due <= 51:
-        return "is within days of being reported to OCM"
-    elif days_past_due == 52:
-        return "has reached the OCM reporting threshold today"
-    else:
-        return (
-            "has exceeded the 52-day threshold and may have already "
-            "been reported to OCM"
-        )
-
-
 def _get_days_until_ocm(days_past_due: int) -> int:
     """Calculate days remaining until the 52-day OCM reporting deadline.
 
@@ -175,8 +156,7 @@ def build_subject_line(
       - 'Invoice' (singular) for 1 invoice, 'Invoices' (plural) for 2+
       - For 2 invoices: joined with ' & '
       - For 3+ invoices: comma-separated, last joined with ' & '
-      - T4 appends ' - ACTION REQUIRED'
-      - T5 appends ' - FINAL NOTICE'
+      - No "ACTION REQUIRED" or "FINAL NOTICE" suffixes (per meeting decision)
       - No period at end
 
     Args:
@@ -199,14 +179,9 @@ def build_subject_line(
         joined = ", ".join(invoice_numbers[:-1]) + " & " + invoice_numbers[-1]
         inv_part = f"Nabis Invoices {joined}"
 
-    # Append urgency suffixes for T4 and T5 if not already present
-    subject_label = tier_label
-    if "40+ Days Past Due" in tier_label and "ACTION REQUIRED" not in tier_label:
-        subject_label = f"{tier_label} - ACTION REQUIRED"
-    elif "50+ Days Past Due" in tier_label and "FINAL NOTICE" not in tier_label:
-        subject_label = f"{tier_label} - FINAL NOTICE"
-
-    return f"PICC - {store_name} - {inv_part} - {subject_label}"
+    # No urgency suffixes -- per meeting decision, no "ACTION REQUIRED"
+    # or "FINAL NOTICE" in subject lines. Ever.
+    return f"PICC - {store_name} - {inv_part} - {tier_label}"
 
 
 # ---------------------------------------------------------------------------
@@ -225,10 +200,7 @@ def build_cc_list(
       - Base CC list (ny.ar@nabis.com, martinm@, mario@, laura@)
       - Assigned sales rep (if known)
 
-    Tier-specific additions:
-      - T3+: Nabis AM email if available
-      - T4+: Store owner/AP contacts if known
-      - T5:  All additional retailer contacts
+    All 3 tiers use the same CC rules. No escalation tiers.
 
     Args:
         config: The full AREmailConfig.
@@ -266,26 +238,10 @@ def build_cc_list(
     if rep_email:
         cc.append(rep_email)
 
-    # Tier-specific escalation
-    tier_name = tier_config.name  # "T1", "T2", ..., "T5"
-
-    # T3+: Add Nabis AM's personal email if we have one
+    # Tier-specific escalation -- 3-tier system (T1, T2, T3)
+    # T3 (30+): Add Nabis AM's personal email if we have one
     # (The base list already includes ny.ar@nabis.com generically.)
-    # We don't have a separate AM email field, so this is a no-op unless
-    # the contact resolver provides one in the future.
-
-    # T4+: Add store owner / AP contacts from the Contact
-    if tier_name in ("T4", "T5") and contact:
-        for extra_email in contact.all_emails:
-            if extra_email and extra_email not in cc:
-                cc.append(extra_email)
-
-    # T5: Add any additional retailer stakeholders
-    if tier_name == "T5" and contact:
-        for extra_contact in contact.all_contacts:
-            email = extra_contact.get("email", "")
-            if email and email not in cc:
-                cc.append(email)
+    # No T4/T5 escalation tiers -- all 30+ use the same CC rules.
 
     # Remove any placeholder tokens that weren't resolved
     cc = [addr for addr in cc if addr and "{" not in addr]
@@ -314,8 +270,6 @@ def build_attachment_list(
     """Determine which files to attach based on tier rules.
 
     All tiers:  Nabis ACH Payment Form.pdf
-    T4+:        Invoice PDF copy (optional, flagged)
-    T5:         Invoice PDF copy + BOL + Account Statement (optional, flagged)
 
     Args:
         config: The full AREmailConfig.
@@ -332,7 +286,7 @@ def build_attachment_list(
     if ach_path:
         attachments.append(ach_path)
 
-    # T4/T5: Include invoice PDF copies and BOLs if available
+    # Include invoice PDF copies and BOLs if tier rules specify them
     tier_rules = config.attachment_rules.tier_attachments.get(tier_config.name, {})
 
     if tier_rules.get("invoice_pdf"):
@@ -432,11 +386,9 @@ def _build_invoice_block(
 ) -> dict[str, str]:
     """Build the template variable dict for a single invoice detail block.
 
-    Different tiers display slightly different fields:
+    Three tiers display slightly different fields:
       - T1/T2: Invoice, Due, Amount, Nabis AM (space separator)
       - T3:    Invoice, Due, Nabis AM (dash separator), Amount
-      - T4:    Invoice, Due, Days Past Due, Nabis AM (dash separator), Amount
-      - T5:    Invoice, Original Due Date, Days Past Due, Nabis AM (dash), Amount Due
 
     The templates handle the actual display order via HTML.  This function
     provides all possible fields and lets the template decide what to show.
@@ -591,7 +543,7 @@ class TemplateEngine:
                 fallback values ("Team" for greeting, empty email for TO).
             config: Optional config override.  Uses self.config if not provided.
             send_date: The date the email will be sent.  Defaults to today.
-                Used for calculating payment deadlines (T4/T5).
+                Used for calculating payment deadlines (30+ tier).
 
         Returns:
             A fully populated EmailDraft instance.
@@ -640,11 +592,18 @@ class TemplateEngine:
         text_body = html_to_plaintext(html_body)
 
         # --- Build subject line ---
+        # For 30+ day invoices, compute dynamic subject label (30+, 40+, 50+, etc.)
+        if primary_invoice.days_past_due >= 30:
+            bucket = (primary_invoice.days_past_due // 10) * 10
+            subject_tier_label = f"{bucket}+ Days Past Due"
+        else:
+            subject_tier_label = tier_cfg.label
+
         invoice_numbers = [str(inv.invoice_number) for inv in invoices]
         subject = build_subject_line(
             store_name=primary_invoice.store_name,
             invoice_numbers=invoice_numbers,
-            tier_label=tier_cfg.label,
+            tier_label=subject_tier_label,
         )
 
         # --- Build CC list ---
@@ -738,29 +697,19 @@ class TemplateEngine:
         config: AREmailConfig,
         tier_cfg: CfgTierConfig,
     ) -> tuple[str, str, str, str]:
-        """Determine sender info based on tier.
+        """Determine sender info. All tiers use the default sender.
 
-        T1-T4: Default sender (Sales Admin)
-        T5:    Escalation sender (Regional Account Manager) if configured
+        No sender escalation -- per meeting decision, all emails come from
+        the same sender regardless of tier.
 
         Args:
             config: The full config.
-            tier_cfg: The tier config.
+            tier_cfg: The tier config (unused but kept for API compatibility).
 
         Returns:
             Tuple of (name, email, title, phone_line_html).
-            phone_line_html is empty string for non-T5 senders.
+            phone_line_html is always empty string.
         """
-        if tier_cfg.sender_override:
-            esc = config.escalation_sender
-            phone_html = (
-                f'<span style="font-family:Arial,Helvetica,sans-serif;">'
-                f"{esc.phone}</span><br>"
-                if esc.phone
-                else ""
-            )
-            return (esc.name, esc.email, esc.title, phone_html)
-
         return (config.sender.name, config.sender.email, config.sender.title, "")
 
     # -------------------------------------------------------------------
@@ -793,7 +742,7 @@ class TemplateEngine:
             sender_name: Resolved sender name.
             sender_email: Resolved sender email.
             sender_title: Resolved sender title.
-            sender_phone_line: HTML phone line (T5 only).
+            sender_phone_line: HTML phone line (unused, kept for compatibility).
             send_date: The send date for deadline calculations.
 
         Returns:
@@ -844,22 +793,24 @@ class TemplateEngine:
             "INVOICE_NOTE": "",
         }
 
-        # --- T2 (Overdue): Timeframe phrase ---
-        if tier_cfg.name == "T2":
-            ctx["OVERDUE_TIMEFRAME"] = get_overdue_timeframe_description(
-                primary.days_past_due
-            )
-        else:
-            # Provide a fallback so templates don't error if they reference it
-            ctx["OVERDUE_TIMEFRAME"] = "past due"
+        # --- T2 (Overdue): Static "overdue" per Callie's fix PDF ---
+        # No dynamic timeframe -- canonical template uses static "overdue"
+        ctx["OVERDUE_TIMEFRAME"] = "overdue"
 
-        # --- T4 (40+ Days): OCM countdown + payment deadline ---
-        if tier_cfg.name == "T4":
+        # --- T3 (30+ Days): Dynamic subject label bucket ---
+        if primary.days_past_due >= 30:
+            bucket = (primary.days_past_due // 10) * 10
+            ctx["DAYS_PAST_DUE_BUCKET"] = f"{bucket}+ Days Past Due"
+        else:
+            ctx["DAYS_PAST_DUE_BUCKET"] = tier_cfg.label
+
+        # --- T3 (30+ Days): Payment deadline ---
+        if primary.days_past_due >= 30:
             days_until_ocm = _get_days_until_ocm(primary.days_past_due)
             ctx["DAYS_UNTIL_OCM_REPORT"] = str(days_until_ocm)
 
             # Payment deadline: earlier of (send + 7 biz days) or (due + 52 days)
-            deadline_from_send = _add_business_days(send_date, _T4_DEADLINE_BIZ_DAYS)
+            deadline_from_send = _add_business_days(send_date, _PAST_DUE_DEADLINE_BIZ_DAYS)
             if primary.due_date:
                 deadline_from_due = primary.due_date + timedelta(days=_OCM_DEADLINE_DAYS)
                 payment_deadline = min(deadline_from_send, deadline_from_due)
@@ -869,15 +820,6 @@ class TemplateEngine:
         else:
             ctx["DAYS_UNTIL_OCM_REPORT"] = ""
             ctx["PAYMENT_DEADLINE"] = ""
-
-        # --- T5 (50+ Days): OCM status phrase + final deadline ---
-        if tier_cfg.name == "T5":
-            ctx["OCM_STATUS_PHRASE"] = _get_ocm_status_phrase(primary.days_past_due)
-            final_deadline = _add_business_days(send_date, _T5_DEADLINE_BIZ_DAYS)
-            ctx["FINAL_PAYMENT_DEADLINE"] = format_date(final_deadline)
-        else:
-            ctx["OCM_STATUS_PHRASE"] = ""
-            ctx["FINAL_PAYMENT_DEADLINE"] = ""
 
         # --- Multi-invoice: build per-invoice blocks ---
         if is_multi:
@@ -1095,8 +1037,8 @@ if __name__ == "__main__":
     print(f"Multi:   {draft2.is_multi_invoice}")
     print(f"Total:   {draft2.total_amount_formatted}")
 
-    # Test T5 - 50+ Days
-    test_inv_t5 = Invoice(
+    # Test T3 - 30+ Days (with dynamic subject)
+    test_inv_t3 = Invoice(
         invoice_number="893271",
         store_name="The Travel Agency - SoHo",
         amount=1552.55,
@@ -1107,18 +1049,18 @@ if __name__ == "__main__":
         sales_rep="Bryce J",
     )
 
-    test_contact_t5 = Contact(
+    test_contact_t3 = Contact(
         store_name="The Travel Agency - SoHo",
         email="ap@thetravelagency.co",
         contact_name="Penelope",
     )
 
-    print("\n--- T5: 50+ Days (single invoice) ---")
-    draft5 = engine.render_email([test_inv_t5], test_contact_t5)
-    print(f"Subject: {draft5.subject}")
-    print(f"To:      {draft5.to}")
-    print(f"Tier:    {draft5.tier.value}")
-    print(f"Attach:  {draft5.attachments}")
+    print("\n--- T3: 30+ Days (single invoice, 111 days -> '110+ Days Past Due' subject) ---")
+    draft3 = engine.render_email([test_inv_t3], test_contact_t3)
+    print(f"Subject: {draft3.subject}")
+    print(f"To:      {draft3.to}")
+    print(f"Tier:    {draft3.tier.value}")
+    print(f"Attach:  {draft3.attachments}")
 
     # Test format helpers
     print("\n--- Format Helpers ---")
@@ -1133,12 +1075,7 @@ if __name__ == "__main__":
     print("\n--- Subject Line Builder ---")
     print(f"  Single: {build_subject_line('Aroma Farms', ['906858'], 'Coming Due')}")
     print(f"  Multi:  {build_subject_line('Seaweed RBNY', ['904667', '905055'], 'Overdue')}")
-    print(f"  Three:  {build_subject_line('Dazed - NY', ['893281', '898505', '901234'], '50+ Days Past Due - FINAL NOTICE')}")
-
-    # Test OCM phrases
-    print("\n--- OCM Status Phrases ---")
-    for d in [50, 51, 52, 53, 60, 111]:
-        print(f"  {d} days: '{_get_ocm_status_phrase(d)}'")
+    print(f"  Three:  {build_subject_line('Dazed - NY', ['893281', '898505', '901234'], '50+ Days Past Due')}")
 
     # Test business day calculator
     print("\n--- Business Day Calculator ---")

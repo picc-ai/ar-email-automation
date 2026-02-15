@@ -14,7 +14,7 @@ from __future__ import annotations
 import csv
 import json
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, time
 from enum import Enum
 from pathlib import Path
 from typing import Self
@@ -27,19 +27,15 @@ from typing import Self
 class Tier(Enum):
     """Email escalation tiers derived from days-past-due.
 
-    Tier boundaries match the observed email examples in the XLSX analysis:
+    3-tier system (consolidated from original 5-tier):
       T0  Coming Due     days <= 0  (not yet due, or due today)
       T1  Overdue        1-29 days
-      T2  30+ Days       30-39 days
-      T3  40+ Days       40-49 days
-      T4  50+ Days       >= 50 days
+      T2  30+ Days       >= 30 days (uses dynamic subject labels: 40+, 50+, etc.)
     """
 
     T0 = "Coming Due"
     T1 = "Overdue"
     T2 = "30+ Days Past Due"
-    T3 = "40+ Days Past Due"
-    T4 = "50+ Days Past Due"
 
     @classmethod
     def from_days(cls, days_past_due: int | float) -> Tier:
@@ -48,11 +44,7 @@ class Tier(Enum):
             return cls.T0
         if days_past_due <= 29:
             return cls.T1
-        if days_past_due <= 39:
-            return cls.T2
-        if days_past_due <= 49:
-            return cls.T3
-        return cls.T4
+        return cls.T2
 
 
 class InvoiceStatus(Enum):
@@ -183,6 +175,19 @@ class Invoice:
         """The tier's display label for subject lines."""
         return self.tier.value
 
+    @property
+    def dynamic_subject_label(self) -> str:
+        """Compute dynamic subject label for 30+ tier emails.
+
+        For T0 and T1, returns the static tier label.
+        For T2 (30+), computes a bucket label like '40+ Days Past Due',
+        '50+ Days Past Due', etc. based on actual days past due.
+        """
+        if self.days_past_due < 30:
+            return self.tier.value
+        bucket = (self.days_past_due // 10) * 10
+        return f"{bucket}+ Days Past Due"
+
 
 @dataclass
 class Contact:
@@ -310,11 +315,37 @@ class EmailDraft:
     # --- attachments ---
     attachments: list[str] = field(default_factory=list)    # File paths
 
+    # --- scheduling ---
+    scheduled_send_time: time | None = None   # Target send time (e.g. 07:00 PT)
+    scheduled_timezone: str = "PT"            # Display timezone label
+
     # --- workflow ---
     status: EmailStatus = EmailStatus.PENDING
     rejection_reason: str = ""
     sent_at: datetime | None = None
     error_message: str = ""
+
+    @property
+    def scheduled_time_display(self) -> str:
+        """Human-readable scheduled send time with timezone conversion.
+
+        Returns e.g. '7:00 AM PT (10:00 AM ET)' or '' if not scheduled.
+        Uses %I (Windows-compatible) and strips leading zero manually.
+        """
+        if self.scheduled_send_time is None:
+            return ""
+        t = self.scheduled_send_time
+        # Compute ET equivalent (PT + 3 hours)
+        et_hour = (t.hour + 3) % 24
+        et_time_val = time(et_hour, t.minute)
+        try:
+            # %I is zero-padded 12-hour; lstrip("0") removes leading zero
+            pt_str = t.strftime("%I:%M %p").lstrip("0")
+            et_str = et_time_val.strftime("%I:%M %p").lstrip("0")
+        except (ValueError, OSError):
+            pt_str = str(t)
+            et_str = str(et_time_val)
+        return f"{pt_str} {self.scheduled_timezone} ({et_str} ET)"
 
     @property
     def invoice_numbers(self) -> list[str]:
@@ -354,11 +385,20 @@ class EmailDraft:
         """Build the full subject line per the observed pattern.
 
         Format: 'PICC - {Location} - Nabis {Invoice(s)} - {Tier Label}'
+
+        For T2 (30+ Days Past Due), uses dynamic_subject_label from the
+        primary invoice to show '40+ Days Past Due', '50+ Days Past Due', etc.
         """
+        # Use dynamic subject label for T2 invoices
+        if self.tier == Tier.T2 and self.invoices:
+            subject_label = self.invoices[0].dynamic_subject_label
+        else:
+            subject_label = self.tier.value
+
         self.subject = (
             f"PICC - {self.store_name} - "
             f"Nabis {self.subject_invoice_part} - "
-            f"{self.tier.value}"
+            f"{subject_label}"
         )
         return self.subject
 
@@ -391,7 +431,7 @@ class EmailDraft:
 
     def to_dict(self) -> dict:
         """Serialize to a plain dict for JSON export / review UI."""
-        return {
+        d = {
             "to": self.to,
             "cc": self.cc,
             "bcc": self.bcc,
@@ -405,6 +445,10 @@ class EmailDraft:
             "status": self.status.value,
             "rejection_reason": self.rejection_reason,
         }
+        if self.scheduled_send_time is not None:
+            d["scheduled_send_time"] = self.scheduled_send_time.isoformat()
+            d["scheduled_time_display"] = self.scheduled_time_display
+        return d
 
 
 @dataclass
@@ -610,9 +654,10 @@ class TierConfig:
 
     @classmethod
     def default_tiers(cls) -> list[Self]:
-        """Return the standard 5-tier escalation ladder.
+        """Return the standard 3-tier escalation ladder.
 
-        Based on the tier definitions in 05-xlsx-data-patterns.md section 4.
+        Consolidated from the original 5-tier system per meeting decision.
+        T0: Coming Due (-7 to 0), T1: Overdue (1-29), T2: 30+ Days Past Due.
 
         CC rules use placeholder rep tokens.  The email builder should
         resolve '{rep_email}' to the actual sales rep email address.
@@ -627,7 +672,7 @@ class TierConfig:
         return [
             cls(
                 tier_name=Tier.T0,
-                min_days=-999,
+                min_days=-7,
                 max_days=0,
                 template_name="coming_due",
                 cc_rules=list(always_cc),
@@ -646,26 +691,8 @@ class TierConfig:
             cls(
                 tier_name=Tier.T2,
                 min_days=30,
-                max_days=39,
-                template_name="past_due_30",
-                cc_rules=list(always_cc),
-                attachment_rules=AttachmentRule.ACH_FORM,
-                include_ocm_warning=True,
-            ),
-            cls(
-                tier_name=Tier.T3,
-                min_days=40,
-                max_days=49,
-                template_name="past_due_40",
-                cc_rules=list(always_cc),
-                attachment_rules=AttachmentRule.ACH_FORM,
-                include_ocm_warning=True,
-            ),
-            cls(
-                tier_name=Tier.T4,
-                min_days=50,
                 max_days=None,
-                template_name="past_due_50",
+                template_name="past_due_30",
                 cc_rules=list(always_cc),
                 attachment_rules=AttachmentRule.ACH_FORM,
                 include_ocm_warning=True,

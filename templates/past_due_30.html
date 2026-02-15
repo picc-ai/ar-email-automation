@@ -3,35 +3,27 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>PICC - {{STORE_NAME}} - Nabis Invoice {{INVOICE_NUMBER}} - 30+ Days Past Due</title>
+  <title>PICC - {{STORE_NAME}} - Nabis Invoice {{INVOICE_NUMBER}} - {{DAYS_PAST_DUE_BUCKET}}</title>
   <!--
     PICC AR Email Template: 30+ DAYS PAST DUE (T3)
     =================================================
-    Tier: T3 - 30+ Days Past Due
-    Trigger: Invoice is 30-39 days past due
+    Tier: T3 - 30+ Days Past Due (SINGLE template for ALL 30+ day invoices)
+    Trigger: Invoice is 30+ days past due (covers 30+, 40+, 50+, 60+, etc.)
     Tone: Formal, regulatory awareness, firm but collaborative
     Urgency: MODERATE
     Attachment: Nabis ACH Payment Form.pdf
     CC Rule: Base team + sales rep + Nabis AM
 
-    Subject Line Formula:
+    Subject Line Formula (DYNAMIC -- subject varies, body stays the same):
       PICC - {{STORE_NAME}} - Nabis Invoice {{INVOICE_NUMBER}} - 30+ Days Past Due
+      PICC - {{STORE_NAME}} - Nabis Invoice {{INVOICE_NUMBER}} - 40+ Days Past Due
+      PICC - {{STORE_NAME}} - Nabis Invoice {{INVOICE_NUMBER}} - 50+ Days Past Due
+      (continues in 10-day increments)
 
-    ESCALATION DESIGN (IMPROVED from original identical template):
-    - This is the FIRST Past Due tier: introduces OCM reporting policy
-    - Mentions the 52-day hard deadline as context
-    - Tone is firm but still collaborative ("we understand oversights happen")
-    - Mentions payment terms as contractual obligation
-    - Adds a specific payment deadline request
-    - No account hold language yet (reserved for 40+)
-
-    KEY DIFFERENCES FROM OVERDUE (T2):
-    - Opener changes to formal "I hope this message finds you well"
-    - Introduces AR department and OCM regulatory context
-    - Mentions Nabis 45-day notification and 52-day reporting thresholds
-    - Closing is longer and more formal with partnership language
-    - "We kindly ask" replaces the softer T2 closing
-    - Uses "Regards," sign-off instead of casual closing
+    Body source: Canonical PDF from Callie (A/R Email Formatting.pdf)
+    NOTE: Bullet order is Invoice, Due, Nabis AM, Amount (differs from T1/T2)
+    NOTE: This is the ONLY past-due template. No "second notice", "final notice",
+          "ACTION REQUIRED", account holds, or collection threats. Ever.
   -->
 </head>
 <body style="margin:0; padding:0; background-color:#ffffff;">
@@ -58,13 +50,6 @@
 
     <br>
 
-    <!-- PAYMENT TERMS REMINDER (NEW - escalation improvement) -->
-    <div style="font-family:Arial,Helvetica,sans-serif;">
-      As a reminder, our standard payment terms require invoices to be settled within the agreed timeframe. This invoice is now over 30 days past due.
-    </div>
-
-    <br>
-
     <!-- INVOICE DETAILS INTRO -->
     <div style="font-family:Arial,Helvetica,sans-serif;">
       According to our records, the following invoice is past due:
@@ -72,7 +57,7 @@
 
     <br>
 
-    <!-- INVOICE DATA BLOCK -->
+    <!-- INVOICE DATA BLOCK (canonical order: Invoice, Due, Nabis AM, Amount) -->
     <ul style="font-family:Arial,Helvetica,sans-serif; margin-left:20px; padding-left:0;">
       <li><strong>Invoice/Order</strong>: <span style="font-size:11pt; font-family:Arial,Helvetica,sans-serif;">{{INVOICE_NUMBER}}</span></li>
       <li><strong>Due</strong>: <span style="font-size:11pt; font-family:Arial,Helvetica,sans-serif;">{{DUE_DATE}}</span></li>
@@ -84,7 +69,7 @@
 
     <!-- ATTACHMENT REFERENCE -->
     <div style="font-family:Arial,Helvetica,sans-serif;">
-      <strong>Attached is the Nabis ACH payment form (PDF) to facilitate your payment.</strong>
+      <strong>Attached you'll find the Nabis ACH payment form (PDF) to help facilitate your payment.</strong>
     </div>
 
     <br>
@@ -96,9 +81,9 @@
 
     <br>
 
-    <!-- PAYMENT REQUEST + DEADLINE -->
+    <!-- PAYMENT REQUEST -->
     <div style="font-family:Arial,Helvetica,sans-serif;">
-      We kindly ask that payment for the past-due invoice be made as soon as possible to bring the account current. Please don't hesitate to reach out if you have any questions or need any support with completing the payment.
+      We kindly ask that payment for the past-due invoices be made as soon as possible to bring the account current. Please don't hesitate to reach out if you have any questions or need any support with completing the payment.
     </div>
 
     <br>
@@ -112,7 +97,7 @@
 
     <!-- CLOSING -->
     <div style="font-family:Arial,Helvetica,sans-serif;">
-      Thank you for your prompt attention to this matter -- we truly value your partnership and look forward to continuing our work together.
+      Thank you for your prompt attention to this matter--we truly value your partnership and look forward to continuing our work together.
     </div>
 
     <br>

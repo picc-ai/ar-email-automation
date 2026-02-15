@@ -24,14 +24,12 @@ from src.tier_classifier import (
     TIER_METADATA,
     TIER_BOUNDARY_OVERDUE,
     TIER_BOUNDARY_PAST_DUE_30,
-    TIER_BOUNDARY_PAST_DUE_40,
-    TIER_BOUNDARY_PAST_DUE_50,
     OCM_NOTIFICATION_DAY,
     OCM_REPORTING_DAY,
     UrgencyLevel,
     classify,
     classify_batch,
-    get_overdue_timeframe_description,
+    get_dynamic_subject_label,
     get_tier,
     get_metadata,
     summarize_batch,
@@ -43,19 +41,13 @@ from src.tier_classifier import (
 # ============================================================================
 
 class TestConstants:
-    """Verify tier boundary constants match the business rules."""
+    """Verify tier boundary constants match the business rules (3-tier system)."""
 
     def test_overdue_boundary(self):
         assert TIER_BOUNDARY_OVERDUE == 1
 
     def test_past_due_30_boundary(self):
         assert TIER_BOUNDARY_PAST_DUE_30 == 30
-
-    def test_past_due_40_boundary(self):
-        assert TIER_BOUNDARY_PAST_DUE_40 == 40
-
-    def test_past_due_50_boundary(self):
-        assert TIER_BOUNDARY_PAST_DUE_50 == 50
 
     def test_ocm_notification_day(self):
         assert OCM_NOTIFICATION_DAY == 45
@@ -72,14 +64,18 @@ class TestTierEnum:
     def test_tier_values(self):
         assert Tier.COMING_DUE.value == "Coming Due"
         assert Tier.OVERDUE.value == "Overdue"
-        assert Tier.PAST_DUE_30.value == "30+ Days Past Due"
-        assert Tier.PAST_DUE_40.value == "40+ Days Past Due"
-        assert Tier.PAST_DUE_50.value == "50+ Days Past Due"
+        assert Tier.PAST_DUE.value == "30+ Days Past Due"
+
+    def test_tier_count(self):
+        assert len(Tier) == 3
+
+    def test_removed_tiers_do_not_exist(self):
+        assert not hasattr(Tier, "PAST_DUE_40")
+        assert not hasattr(Tier, "PAST_DUE_50")
 
     def test_tier_is_string_enum(self):
         """Tier inherits from str, so values can be compared as strings."""
         assert isinstance(Tier.COMING_DUE, str)
-        # The .value property gives the string representation
         assert Tier.COMING_DUE.value == "Coming Due"
 
 
@@ -93,7 +89,7 @@ class TestClassifySingle:
     # --- Tier boundaries: exact values ---
 
     @pytest.mark.parametrize("days,expected_tier", [
-        # Coming Due: < 1 (i.e., <= 0)
+        # Coming Due: <= 0
         (-100, Tier.COMING_DUE),
         (-5, Tier.COMING_DUE),
         (-1, Tier.COMING_DUE),
@@ -105,22 +101,18 @@ class TestClassifySingle:
         (15, Tier.OVERDUE),
         (29, Tier.OVERDUE),
 
-        # Past Due 30+: 30-39
-        (30, Tier.PAST_DUE_30),
-        (35, Tier.PAST_DUE_30),
-        (39, Tier.PAST_DUE_30),
-
-        # Past Due 40+: 40-49
-        (40, Tier.PAST_DUE_40),
-        (45, Tier.PAST_DUE_40),
-        (49, Tier.PAST_DUE_40),
-
-        # Past Due 50+: >= 50
-        (50, Tier.PAST_DUE_50),
-        (52, Tier.PAST_DUE_50),
-        (75, Tier.PAST_DUE_50),
-        (111, Tier.PAST_DUE_50),
-        (999, Tier.PAST_DUE_50),
+        # Past Due 30+: >= 30 (all consolidated into one tier)
+        (30, Tier.PAST_DUE),
+        (35, Tier.PAST_DUE),
+        (39, Tier.PAST_DUE),
+        (40, Tier.PAST_DUE),   # was PAST_DUE_40, now consolidated
+        (45, Tier.PAST_DUE),
+        (49, Tier.PAST_DUE),
+        (50, Tier.PAST_DUE),   # was PAST_DUE_50, now consolidated
+        (52, Tier.PAST_DUE),
+        (75, Tier.PAST_DUE),
+        (111, Tier.PAST_DUE),
+        (999, Tier.PAST_DUE),
     ])
     def test_tier_assignment(self, days, expected_tier):
         result = classify(days)
@@ -135,19 +127,19 @@ class TestClassifySingle:
         assert classify(1).tier == Tier.OVERDUE
 
     def test_boundary_past_due_30_transition(self):
-        """Day 29 is OVERDUE, day 30 is PAST_DUE_30."""
+        """Day 29 is OVERDUE, day 30 is PAST_DUE."""
         assert classify(29).tier == Tier.OVERDUE
-        assert classify(30).tier == Tier.PAST_DUE_30
+        assert classify(30).tier == Tier.PAST_DUE
 
-    def test_boundary_past_due_40_transition(self):
-        """Day 39 is PAST_DUE_30, day 40 is PAST_DUE_40."""
-        assert classify(39).tier == Tier.PAST_DUE_30
-        assert classify(40).tier == Tier.PAST_DUE_40
+    def test_no_40_boundary(self):
+        """Day 39 and day 40 are both PAST_DUE (no boundary at 40 anymore)."""
+        assert classify(39).tier == Tier.PAST_DUE
+        assert classify(40).tier == Tier.PAST_DUE
 
-    def test_boundary_past_due_50_transition(self):
-        """Day 49 is PAST_DUE_40, day 50 is PAST_DUE_50."""
-        assert classify(49).tier == Tier.PAST_DUE_40
-        assert classify(50).tier == Tier.PAST_DUE_50
+    def test_no_50_boundary(self):
+        """Day 49 and day 50 are both PAST_DUE (no boundary at 50 anymore)."""
+        assert classify(49).tier == Tier.PAST_DUE
+        assert classify(50).tier == Tier.PAST_DUE
 
     # --- Edge cases ---
 
@@ -166,7 +158,7 @@ class TestClassifySingle:
 
     def test_very_large_days(self):
         result = classify(999)
-        assert result.tier == Tier.PAST_DUE_50
+        assert result.tier == Tier.PAST_DUE
         assert result.is_past_ocm_deadline is True
         assert result.days_until_ocm == 0
 
@@ -183,7 +175,7 @@ class TestClassifySingle:
 
     def test_float_input(self):
         result = classify(35.7)
-        assert result.tier == Tier.PAST_DUE_30
+        assert result.tier == Tier.PAST_DUE
         assert result.days_past_due == 35  # truncated to int
 
     def test_negative_float_input(self):
@@ -201,8 +193,8 @@ class TestClassifySingle:
 
     def test_result_metadata_matches_tier(self):
         for days, expected_tier in [(-2, Tier.COMING_DUE), (15, Tier.OVERDUE),
-                                     (35, Tier.PAST_DUE_30), (45, Tier.PAST_DUE_40),
-                                     (75, Tier.PAST_DUE_50)]:
+                                     (35, Tier.PAST_DUE), (45, Tier.PAST_DUE),
+                                     (75, Tier.PAST_DUE)]:
             result = classify(days)
             assert result.metadata.tier == expected_tier
             assert result.metadata == TIER_METADATA[expected_tier]
@@ -250,48 +242,42 @@ class TestOCMDeadline:
 # ============================================================================
 
 class TestTierMetadata:
-    """Test the TIER_METADATA dictionary for completeness."""
+    """Test the TIER_METADATA dictionary for completeness (3-tier system)."""
 
     def test_all_tiers_have_metadata(self):
         for tier in Tier:
             assert tier in TIER_METADATA
 
+    def test_metadata_count(self):
+        assert len(TIER_METADATA) == 3
+
     def test_metadata_template_names(self):
         assert TIER_METADATA[Tier.COMING_DUE].template_name == "coming_due"
         assert TIER_METADATA[Tier.OVERDUE].template_name == "overdue"
-        assert TIER_METADATA[Tier.PAST_DUE_30].template_name == "past_due_30"
-        assert TIER_METADATA[Tier.PAST_DUE_40].template_name == "past_due_40"
-        assert TIER_METADATA[Tier.PAST_DUE_50].template_name == "past_due_50"
+        assert TIER_METADATA[Tier.PAST_DUE].template_name == "past_due_30"
 
     def test_metadata_urgency_levels(self):
         assert TIER_METADATA[Tier.COMING_DUE].urgency_level == UrgencyLevel.LOW
         assert TIER_METADATA[Tier.OVERDUE].urgency_level == UrgencyLevel.MODERATE
-        assert TIER_METADATA[Tier.PAST_DUE_30].urgency_level == UrgencyLevel.HIGH
-        assert TIER_METADATA[Tier.PAST_DUE_40].urgency_level == UrgencyLevel.CRITICAL
-        assert TIER_METADATA[Tier.PAST_DUE_50].urgency_level == UrgencyLevel.SEVERE
+        assert TIER_METADATA[Tier.PAST_DUE].urgency_level == UrgencyLevel.HIGH
 
     def test_metadata_subject_labels(self):
         assert TIER_METADATA[Tier.COMING_DUE].subject_label == "Coming Due"
         assert TIER_METADATA[Tier.OVERDUE].subject_label == "Overdue"
-        assert TIER_METADATA[Tier.PAST_DUE_30].subject_label == "30+ Days Past Due"
-        assert TIER_METADATA[Tier.PAST_DUE_40].subject_label == "40+ Days Past Due"
-        assert TIER_METADATA[Tier.PAST_DUE_50].subject_label == "50+ Days Past Due"
+        assert TIER_METADATA[Tier.PAST_DUE].subject_label == "30+ Days Past Due"
 
     def test_ocm_warning_tiers(self):
         assert TIER_METADATA[Tier.COMING_DUE].includes_ocm_warning is False
         assert TIER_METADATA[Tier.OVERDUE].includes_ocm_warning is False
-        assert TIER_METADATA[Tier.PAST_DUE_30].includes_ocm_warning is True
-        assert TIER_METADATA[Tier.PAST_DUE_40].includes_ocm_warning is True
-        assert TIER_METADATA[Tier.PAST_DUE_50].includes_ocm_warning is True
+        assert TIER_METADATA[Tier.PAST_DUE].includes_ocm_warning is True
 
     def test_cc_rules_type(self):
         for tier in Tier:
             assert isinstance(TIER_METADATA[tier].cc_rules, CCRules)
 
-    def test_past_due_50_includes_additional_contacts(self):
-        cc = TIER_METADATA[Tier.PAST_DUE_50].cc_rules
-        assert cc.include_additional_retailer_contacts is True
-        assert cc.include_additional_picc_managers is True
+    def test_past_due_includes_nabis_am(self):
+        cc = TIER_METADATA[Tier.PAST_DUE].cc_rules
+        assert cc.include_nabis_am is True
 
     def test_coming_due_no_additional_contacts(self):
         cc = TIER_METADATA[Tier.COMING_DUE].cc_rules
@@ -303,40 +289,37 @@ class TestTierMetadata:
 # Overdue Timeframe Description
 # ============================================================================
 
-class TestOverdueTimeframeDescription:
-    """Test get_overdue_timeframe_description for the T2 (Overdue) tier."""
+class TestDynamicSubjectLabel:
+    """Test get_dynamic_subject_label for dynamic subject line generation."""
 
-    @pytest.mark.parametrize("days,expected_phrase", [
-        (0, "due soon"),
-        (-1, "due soon"),
-        (1, "now past due"),
-        (2, "now past due"),
-        (3, "now past due"),
-        (4, "over a week past due"),
-        (8, "over a week past due"),
-        (10, "over a week past due"),
-        (11, "nearing two weeks past due"),
-        (12, "nearing two weeks past due"),
-        (13, "nearing two weeks past due"),
-        (14, "over two weeks past due"),
-        (15, "over two weeks past due"),
-        (20, "over two weeks past due"),
-        (21, "over three weeks past due"),
-        (22, "over three weeks past due"),
-        (27, "over three weeks past due"),
-        (28, "nearing a month past due"),
-        (29, "nearing a month past due"),
+    @pytest.mark.parametrize("days,expected_label", [
+        (-2, "Coming Due"),
+        (0, "Coming Due"),
+        (1, "Overdue"),
+        (15, "Overdue"),
+        (29, "Overdue"),
+        (30, "30+ Days Past Due"),
+        (35, "30+ Days Past Due"),
+        (39, "30+ Days Past Due"),
+        (40, "40+ Days Past Due"),
+        (45, "40+ Days Past Due"),
+        (49, "40+ Days Past Due"),
+        (50, "50+ Days Past Due"),
+        (52, "50+ Days Past Due"),
+        (59, "50+ Days Past Due"),
+        (60, "60+ Days Past Due"),
+        (75, "70+ Days Past Due"),
+        (111, "110+ Days Past Due"),
+        (999, "990+ Days Past Due"),
     ])
-    def test_timeframe_phrase(self, days, expected_phrase):
-        assert get_overdue_timeframe_description(days) == expected_phrase
+    def test_dynamic_label(self, days, expected_label):
+        assert get_dynamic_subject_label(days) == expected_label
 
-    def test_beyond_overdue_range(self):
-        """Days > 29 should still return a reasonable phrase."""
-        phrase = get_overdue_timeframe_description(35)
-        assert "weeks past due" in phrase
-
-    def test_zero_returns_due_soon(self):
-        assert get_overdue_timeframe_description(0) == "due soon"
+    def test_bucket_formula(self):
+        """Verify the floor(days/10)*10 bucket formula."""
+        assert get_dynamic_subject_label(47) == "40+ Days Past Due"
+        assert get_dynamic_subject_label(30) == "30+ Days Past Due"
+        assert get_dynamic_subject_label(100) == "100+ Days Past Due"
 
 
 # ============================================================================
@@ -533,12 +516,12 @@ class TestConvenienceFunctions:
         (0, Tier.COMING_DUE),
         (1, Tier.OVERDUE),
         (29, Tier.OVERDUE),
-        (30, Tier.PAST_DUE_30),
-        (39, Tier.PAST_DUE_30),
-        (40, Tier.PAST_DUE_40),
-        (49, Tier.PAST_DUE_40),
-        (50, Tier.PAST_DUE_50),
-        (111, Tier.PAST_DUE_50),
+        (30, Tier.PAST_DUE),
+        (39, Tier.PAST_DUE),
+        (40, Tier.PAST_DUE),    # consolidated from PAST_DUE_40
+        (49, Tier.PAST_DUE),    # consolidated from PAST_DUE_40
+        (50, Tier.PAST_DUE),    # consolidated from PAST_DUE_50
+        (111, Tier.PAST_DUE),   # consolidated from PAST_DUE_50
         (None, Tier.COMING_DUE),
     ])
     def test_get_tier(self, days, expected):
@@ -573,10 +556,10 @@ class TestRealDataScenarios:
         ("904667", 17, Tier.OVERDUE, "Seaweed RBNY"),
         ("905055", 19, Tier.OVERDUE, "Seaweed RBNY #2"),
         ("903480", 27, Tier.OVERDUE, "Long Island Cannabis Club"),
-        ("902925", 31, Tier.PAST_DUE_30, "Royal Blend Dispensary"),
-        ("902398", 39, Tier.PAST_DUE_30, "Herbwell - Manhattan"),
-        ("893271", 111, Tier.PAST_DUE_50, "The Travel Agency - SoHo"),
-        ("893281", 111, Tier.PAST_DUE_50, "Dazed - New York"),
+        ("902925", 31, Tier.PAST_DUE, "Royal Blend Dispensary"),
+        ("902398", 39, Tier.PAST_DUE, "Herbwell - Manhattan"),
+        ("893271", 111, Tier.PAST_DUE, "The Travel Agency - SoHo"),
+        ("893281", 111, Tier.PAST_DUE, "Dazed - New York"),
     ])
     def test_real_invoice(self, order_no, days, expected_tier, description):
         result = classify(days)

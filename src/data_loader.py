@@ -980,6 +980,153 @@ def _parse_invoice_status(raw: str | None) -> InvoiceStatus:
 
 
 # ---------------------------------------------------------------------------
+# Brand AR Summary XLSX loader
+# ---------------------------------------------------------------------------
+
+@dataclass
+class BrandARContact:
+    """A retailer contact record from the Nabis Brand AR Summary XLSX.
+
+    This XLSX is a separate document from the main AR Overdue workbook.
+    It contains Nabis's POC (Point of Contact) email and phone data for
+    each retailer, and is considered "the most reliable when available"
+    per the AR email automation meeting.
+
+    The XLSX has header rows in row 3 (rows 1-2 are title/header).
+    Key columns: Retailer (A), POC Email (O), POC Phone (P).
+    """
+
+    retailer_name: str
+    poc_emails: list[str] = field(default_factory=list)
+    poc_phones: list[str] = field(default_factory=list)
+    retailer_type: str = ""          # e.g. "Good", "Weak", "Excellent", "Poor"
+    responsiveness: str = ""         # e.g. "Responsive", "Unresponsive", "Semi-Responsive"
+    notes: str = ""
+
+
+# Default path for Brand AR Summary -- configurable via load_brand_ar_summary()
+_DEFAULT_BRAND_AR_PATH = r"A:\Downloads\Brand AR Summary - PICC (1).xlsx"
+
+
+def load_brand_ar_summary(
+    source: Union[str, Path, None] = None,
+) -> dict[str, BrandARContact]:
+    """Load the Nabis Brand AR Summary XLSX as a supplemental contact source.
+
+    The XLSX has a specific layout:
+      - Rows 1-2: title/header rows
+      - Row 3: actual column headers
+      - Columns: Retailer (A), Retailer Type (B), Responsiveness (C),
+        ..., POC Email (O), POC Phone (P), Notes (Q)
+
+    POC Email may contain multiple newline-delimited addresses.
+
+    Parameters
+    ----------
+    source:
+        File path to the Brand AR Summary XLSX.  When None, uses the
+        default path.
+
+    Returns
+    -------
+    dict[str, BrandARContact]
+        Dict mapping the raw retailer name -> BrandARContact object.
+        Returns empty dict if file not found or cannot be parsed.
+    """
+    if source is None:
+        source = _DEFAULT_BRAND_AR_PATH
+
+    path = Path(source)
+    if not path.exists():
+        logger.warning(
+            "Brand AR Summary XLSX not found at %s -- "
+            "fallback contact resolution will be unavailable",
+            path,
+        )
+        return {}
+
+    try:
+        wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
+    except Exception as exc:
+        logger.error("Failed to open Brand AR Summary XLSX: %s", exc)
+        return {}
+
+    # Find the first sheet (typically "Sheet1")
+    ws = wb.active
+    if ws is None:
+        logger.error("Brand AR Summary XLSX has no active sheet")
+        wb.close()
+        return {}
+
+    contacts: dict[str, BrandARContact] = {}
+
+    # Row 3 has column headers; data starts at row 4
+    # Column mapping (0-indexed): A=0 Retailer, B=1 Type, C=2 Responsiveness,
+    # O=14 POC Email, P=15 POC Phone, Q=16 Notes
+    _COL_RETAILER = 0
+    _COL_TYPE = 1
+    _COL_RESPONSIVENESS = 2
+    _COL_POC_EMAIL = 14
+    _COL_POC_PHONE = 15
+    _COL_NOTES = 16
+
+    row_count = 0
+    for row in ws.iter_rows(min_row=4, values_only=True):
+        if not row or len(row) <= _COL_RETAILER:
+            continue
+
+        retailer_raw = row[_COL_RETAILER]
+        if retailer_raw is None or str(retailer_raw).strip() == "":
+            continue
+
+        retailer_name = str(retailer_raw).strip()
+
+        # Parse POC Email (may be multi-line)
+        poc_email_raw = ""
+        if len(row) > _COL_POC_EMAIL and row[_COL_POC_EMAIL]:
+            poc_email_raw = str(row[_COL_POC_EMAIL]).strip()
+        poc_emails = _parse_emails(poc_email_raw) if poc_email_raw else []
+
+        # Parse POC Phone
+        poc_phones: list[str] = []
+        if len(row) > _COL_POC_PHONE and row[_COL_POC_PHONE]:
+            phone_raw = str(row[_COL_POC_PHONE]).strip()
+            poc_phones = [p.strip() for p in phone_raw.split("\n") if p.strip()]
+
+        # Retailer Type
+        retailer_type = ""
+        if len(row) > _COL_TYPE and row[_COL_TYPE]:
+            retailer_type = str(row[_COL_TYPE]).strip()
+
+        # Responsiveness
+        responsiveness = ""
+        if len(row) > _COL_RESPONSIVENESS and row[_COL_RESPONSIVENESS]:
+            responsiveness = str(row[_COL_RESPONSIVENESS]).strip()
+
+        # Notes
+        notes = ""
+        if len(row) > _COL_NOTES and row[_COL_NOTES]:
+            notes = str(row[_COL_NOTES]).strip()
+
+        contacts[retailer_name] = BrandARContact(
+            retailer_name=retailer_name,
+            poc_emails=poc_emails,
+            poc_phones=poc_phones,
+            retailer_type=retailer_type,
+            responsiveness=responsiveness,
+            notes=notes,
+        )
+        row_count += 1
+
+    wb.close()
+    logger.info(
+        "Loaded %d Brand AR Summary contacts from %s",
+        row_count, path,
+    )
+    return contacts
+
+
+# ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
 

@@ -13,6 +13,20 @@ Matching strategy (priority order):
     4. Fuzzy Store Name only                      ->  60% confidence
     5. No match                                   ->   0% (manual review)
 
+Contact selection priority chain (SOP from meeting 2026-02):
+    1. Primary Contact (from Managers sheet / Notion)
+    2. Billing/AP Contact (send to BOTH primary AND billing)
+    3. Associated Contacts (Nabis-sourced > CRM > unlabeled >> Revelry-sourced)
+    4. Brand AR Summary POC email (Nabis-provided XLSX fallback)
+    5. No contact found -> editable placeholder for manual entry
+
+CC rules (always):
+    - ny.ar@nabis.com
+    - martinm@piccplatform.com
+    - mario@piccplatform.com
+    - laura@piccplatform.com
+    - Dynamic: assigned PICC sales rep email for the account
+
 Uses difflib.SequenceMatcher for fuzzy matching (no external dependencies).
 """
 
@@ -26,6 +40,56 @@ from enum import Enum
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Source trust levels for associated contacts
+# ---------------------------------------------------------------------------
+
+SOURCE_TRUST: dict[str, str] = {
+    "nabis import": "high",
+    "nabis poc": "high",
+    "crm contact": "high",
+    "nabis order, point of contact": "high",
+    "revelry buyers list": "low",
+    "revelry": "low",
+}
+
+
+def _get_source_trust(source: str) -> str:
+    """Return trust level for a contact source label.
+
+    Returns 'high', 'low', or 'medium' (default for unknown sources).
+    """
+    if not source:
+        return "medium"
+    return SOURCE_TRUST.get(source.strip().lower(), "medium")
+
+
+# ---------------------------------------------------------------------------
+# Rep email mapping
+# ---------------------------------------------------------------------------
+
+REP_EMAIL_MAP: dict[str, str] = {
+    "Ben": "b.rosenthal@piccplatform.com",
+    "Bryce J": "bryce@piccplatform.com",
+    "Donovan": "donovan@piccplatform.com",
+    "Eric": "eric@piccplatform.com",
+    "M Martin": "martinm@piccplatform.com",
+    "Mario": "mario@piccplatform.com",
+    "Matt M": "matt@piccplatform.com",
+}
+
+# Hardcoded base CC list per meeting SOP
+ALWAYS_CC: list[str] = [
+    "ny.ar@nabis.com",
+    "martinm@piccplatform.com",
+    "mario@piccplatform.com",
+    "laura@piccplatform.com",
+]
+
+# Placeholder for no-contact-found emails
+NO_CONTACT_PLACEHOLDER = "(no contact found - enter manually)"
 
 
 # ---------------------------------------------------------------------------
@@ -74,6 +138,12 @@ class MatchResult:
         matched_contact_name: The retailer name from the Managers sheet that
             was matched (may differ slightly from invoice location).
         notes: Human-readable notes about the match for audit/review.
+        resolution_chain: Ordered list of sources that were consulted during
+            contact resolution (for audit trail).
+        to_emails: Resolved TO recipient list (may be multiple: primary + billing).
+        cc_emails: Resolved CC recipient list (always includes base + rep).
+        contact_source: Which source provided the final contact (e.g.,
+            'managers_sheet', 'brand_ar_summary', 'manual').
     """
     invoice_order_nos: list[int]
     invoice_location: str
@@ -83,6 +153,39 @@ class MatchResult:
     fuzzy_score: float = 0.0
     matched_contact_name: str = ""
     notes: str = ""
+    resolution_chain: list[str] = field(default_factory=list)
+    to_emails: list[str] = field(default_factory=list)
+    cc_emails: list[str] = field(default_factory=list)
+    contact_source: str = ""
+
+    @property
+    def contact_emails(self) -> list[str]:
+        """Return all available email addresses from the resolved contact.
+
+        Prefers the resolved to_emails list (which may include both primary
+        and billing contacts). Falls back to the contact's all_emails or
+        single email field.
+        """
+        if self.to_emails:
+            return list(self.to_emails)
+        if self.contact is None:
+            return []
+        if hasattr(self.contact, 'all_emails') and self.contact.all_emails:
+            return list(self.contact.all_emails)
+        if hasattr(self.contact, 'email') and self.contact.email:
+            return [self.contact.email]
+        return []
+
+    @property
+    def primary_contact_name(self) -> str:
+        """Return the name of the primary contact for email greeting."""
+        if self.contact is None:
+            return ""
+        if hasattr(self.contact, 'contact_name') and self.contact.contact_name:
+            return self.contact.contact_name
+        if hasattr(self.contact, 'first_name') and self.contact.first_name:
+            return self.contact.first_name
+        return ""
 
 
 @dataclass
@@ -334,6 +437,8 @@ class ContactResolver:
         self,
         contacts: list,
         fuzzy_threshold: float = FUZZY_THRESHOLD,
+        brand_ar_contacts: dict[str, object] | None = None,
+        rep_email_map: dict[str, str] | None = None,
     ) -> None:
         """Initialize the resolver with a contact directory.
 
@@ -341,9 +446,18 @@ class ContactResolver:
             contacts: List of Contact objects (from Managers sheet).
             fuzzy_threshold: Minimum SequenceMatcher ratio for fuzzy
                 matches (default 0.70).
+            brand_ar_contacts: Optional dict mapping normalized retailer
+                name -> BrandARContact objects (from Brand AR Summary XLSX).
+                Used as fallback (Priority 4) when no contact is found in
+                the Managers sheet.
+            rep_email_map: Optional dict mapping sales rep short name
+                (e.g. "Ben", "Bryce J") -> email address.  Used for
+                building the CC list.  Falls back to REP_EMAIL_MAP.
         """
         self.contacts = contacts
         self.fuzzy_threshold = fuzzy_threshold
+        self._brand_ar_contacts = brand_ar_contacts or {}
+        self._rep_email_map = rep_email_map or REP_EMAIL_MAP
 
         # Build lookup indexes
         self._license_index = _build_license_index(contacts)
@@ -359,12 +473,21 @@ class ContactResolver:
                 # Group by normalized name
                 self._name_candidates.append((raw, norm, [contact]))
 
+        # Pre-compute Brand AR Summary name candidates for fuzzy matching
+        self._brand_ar_name_candidates: list[tuple[str, str, object]] = []
+        for raw_name, ar_contact in self._brand_ar_contacts.items():
+            norm = _normalize_name(raw_name)
+            self._brand_ar_name_candidates.append(
+                (raw_name, norm, ar_contact)
+            )
+
         logger.info(
             "ContactResolver initialized: %d contacts, %d license keys, "
-            "%d name keys",
+            "%d name keys, %d brand AR contacts",
             len(contacts),
             len(self._license_index),
             len(self._name_index),
+            len(self._brand_ar_contacts),
         )
 
     # -------------------------------------------------------------------
@@ -599,6 +722,277 @@ class ContactResolver:
         return result
 
     # -------------------------------------------------------------------
+    # Contact SOP priority chain
+    # -------------------------------------------------------------------
+
+    def resolve_to_recipients(self, match_result: MatchResult) -> MatchResult:
+        """Apply the meeting-defined SOP priority chain to populate to_emails.
+
+        Priority cascade for TO recipients:
+          1. Primary Contact (from matched contact's primary email)
+          2. Billing/AP Contact (if available, add to TO alongside primary)
+          3. Associated Contacts (prefer Nabis-sourced over Revelry-sourced)
+          4. Brand AR Summary POC email (fallback from Nabis-provided XLSX)
+          5. No contact found -> leave placeholder for manual entry
+
+        Also populates resolution_chain for audit trail.
+
+        Args:
+            match_result: A MatchResult from match_invoice().
+
+        Returns:
+            The same MatchResult, updated with to_emails and resolution_chain.
+        """
+        chain: list[str] = []
+        to_emails: list[str] = []
+        contact = match_result.contact
+
+        # ------------------------------------------------------------------
+        # Priority 1 & 2: Primary + Billing from matched contact
+        # ------------------------------------------------------------------
+        if contact is not None:
+            primary_email = getattr(contact, "email", "")
+            all_emails = getattr(contact, "all_emails", []) or []
+            all_contacts = getattr(contact, "all_contacts", []) or []
+            contact_role = getattr(contact, "role", "")
+
+            chain.append(f"Managers sheet match: '{match_result.matched_contact_name}'")
+
+            # Add primary email
+            if primary_email:
+                to_emails.append(primary_email)
+                chain.append(f"  -> Primary email: {primary_email}")
+
+            # Check for billing/AP contacts in all_contacts
+            billing_emails = self._find_billing_contacts(all_contacts, all_emails)
+            for be in billing_emails:
+                if be and be.lower() not in [e.lower() for e in to_emails]:
+                    to_emails.append(be)
+                    chain.append(f"  -> Billing/AP email: {be}")
+
+            # Priority 3: Associated Contacts (with source trust filtering)
+            if not to_emails:
+                chain.append("  -> No primary/billing email; checking associated contacts")
+                trusted, untrusted = self._filter_contacts_by_source(all_contacts, all_emails)
+
+                # Prefer high-trust sources first
+                for email in trusted:
+                    if email.lower() not in [e.lower() for e in to_emails]:
+                        to_emails.append(email)
+                        chain.append(f"  -> Trusted associated contact: {email}")
+
+                # Fall back to low-trust (Revelry) only if nothing else
+                if not to_emails and untrusted:
+                    for email in untrusted:
+                        if email.lower() not in [e.lower() for e in to_emails]:
+                            to_emails.append(email)
+                            chain.append(
+                                f"  -> Revelry-sourced contact (low trust): {email}"
+                            )
+
+            if to_emails:
+                match_result.contact_source = "managers_sheet"
+
+        # ------------------------------------------------------------------
+        # Priority 4: Brand AR Summary fallback
+        # ------------------------------------------------------------------
+        if not to_emails and match_result.invoice_location:
+            chain.append("Checking Brand AR Summary XLSX fallback")
+            ar_emails = self._lookup_brand_ar_emails(
+                match_result.invoice_location
+            )
+            if ar_emails:
+                to_emails.extend(ar_emails)
+                match_result.contact_source = "brand_ar_summary"
+                chain.append(
+                    f"  -> Brand AR Summary POC: {', '.join(ar_emails)}"
+                )
+            else:
+                chain.append("  -> No match in Brand AR Summary")
+
+        # ------------------------------------------------------------------
+        # Priority 5: No contact found
+        # ------------------------------------------------------------------
+        if not to_emails:
+            chain.append("No contact found from any source. Manual entry needed.")
+            match_result.contact_source = "manual"
+
+        match_result.to_emails = to_emails
+        match_result.resolution_chain = chain
+        return match_result
+
+    def build_cc_list(
+        self,
+        invoice: object,
+        extra_cc: list[str] | None = None,
+    ) -> list[str]:
+        """Build the CC recipient list per the meeting SOP.
+
+        Always CC (hardcoded base):
+          - ny.ar@nabis.com
+          - martinm@piccplatform.com
+          - mario@piccplatform.com
+          - laura@piccplatform.com
+
+        Dynamic CC:
+          - The assigned PICC sales rep email for the account
+
+        Args:
+            invoice: An Invoice object with a ``sales_rep`` attribute.
+            extra_cc: Optional additional CC addresses.
+
+        Returns:
+            De-duplicated list of CC email addresses.
+        """
+        cc: list[str] = list(ALWAYS_CC)
+
+        # Add the assigned sales rep email
+        sales_rep = str(getattr(invoice, "sales_rep", "") or "").strip()
+        if sales_rep:
+            rep_email = self._rep_email_map.get(sales_rep, "")
+            if rep_email and rep_email.lower() not in [c.lower() for c in cc]:
+                cc.append(rep_email)
+
+        # Add any extra CCs
+        if extra_cc:
+            for addr in extra_cc:
+                if addr and addr.lower() not in [c.lower() for c in cc]:
+                    cc.append(addr)
+
+        # Remove any placeholder tokens
+        cc = [addr for addr in cc if addr and "{" not in addr]
+
+        # De-duplicate while preserving order
+        seen: set[str] = set()
+        deduped: list[str] = []
+        for addr in cc:
+            addr_lower = addr.strip().lower()
+            if addr_lower not in seen:
+                seen.add(addr_lower)
+                deduped.append(addr.strip())
+
+        return deduped
+
+    # -------------------------------------------------------------------
+    # Private helpers for SOP chain
+    # -------------------------------------------------------------------
+
+    @staticmethod
+    def _find_billing_contacts(
+        all_contacts: list[dict[str, str]],
+        all_emails: list[str],
+    ) -> list[str]:
+        """Find billing/AP contacts from the all_contacts list.
+
+        Returns emails of contacts whose title indicates billing/AP role.
+        """
+        billing_emails: list[str] = []
+        billing_keywords = ["ap", "accounts payable", "billing", "accounting",
+                            "finance", "invoic"]
+
+        for contact_dict in all_contacts:
+            title = (contact_dict.get("title") or "").lower()
+            name = (contact_dict.get("name") or contact_dict.get("full_name") or "").lower()
+            combined = f"{name} {title}"
+
+            for kw in billing_keywords:
+                if kw in combined:
+                    # Try to find an email for this contact
+                    email = contact_dict.get("email", "")
+                    if email:
+                        billing_emails.append(email)
+                    break
+
+        # Also check all_emails for AP/billing-pattern emails
+        for email in all_emails:
+            email_lower = email.lower()
+            if any(prefix in email_lower for prefix in
+                   ["ap@", "accounting@", "invoices@", "billing@"]):
+                if email not in billing_emails:
+                    billing_emails.append(email)
+
+        return billing_emails
+
+    @staticmethod
+    def _filter_contacts_by_source(
+        all_contacts: list[dict[str, str]],
+        all_emails: list[str],
+    ) -> tuple[list[str], list[str]]:
+        """Split contacts into trusted and untrusted based on source labels.
+
+        Returns:
+            (trusted_emails, untrusted_emails) where untrusted = Revelry-sourced.
+        """
+        trusted: list[str] = []
+        untrusted: list[str] = []
+
+        for contact_dict in all_contacts:
+            source = (contact_dict.get("source") or "").strip()
+            email = contact_dict.get("email", "")
+            if not email:
+                continue
+
+            trust = _get_source_trust(source)
+            if trust == "low":
+                untrusted.append(email)
+            else:
+                trusted.append(email)
+
+        # If no contacts had source labels, treat all_emails as medium trust
+        if not trusted and not untrusted and all_emails:
+            trusted = list(all_emails)
+
+        return trusted, untrusted
+
+    def _lookup_brand_ar_emails(self, location: str) -> list[str]:
+        """Look up POC emails from the Brand AR Summary by store name.
+
+        Uses the same fuzzy matching logic as the main contact resolver.
+
+        Args:
+            location: The store name / location from the invoice.
+
+        Returns:
+            List of POC email addresses from the Brand AR Summary, or
+            empty list if no match.
+        """
+        if not self._brand_ar_contacts:
+            return []
+
+        name_key = _normalize_name(location)
+
+        # Exact match first
+        for raw_name, norm, ar_contact in self._brand_ar_name_candidates:
+            if norm == name_key:
+                emails = getattr(ar_contact, "poc_emails", []) or []
+                if emails:
+                    logger.info(
+                        "Brand AR Summary exact match: '%s' -> %s",
+                        location, emails,
+                    )
+                    return emails
+
+        # Fuzzy match
+        best_score = 0.0
+        best_contact = None
+        for raw_name, _norm, ar_contact in self._brand_ar_name_candidates:
+            score = _compute_similarity(location, raw_name)
+            if score > best_score:
+                best_score = score
+                best_contact = ar_contact
+
+        if best_score >= self.fuzzy_threshold and best_contact is not None:
+            emails = getattr(best_contact, "poc_emails", []) or []
+            if emails:
+                logger.info(
+                    "Brand AR Summary fuzzy match: '%s' (score=%.3f) -> %s",
+                    location, best_score, emails,
+                )
+                return emails
+
+        return []
+
+    # -------------------------------------------------------------------
     # Batch resolution
     # -------------------------------------------------------------------
 
@@ -626,6 +1020,10 @@ class ContactResolver:
             results = self._resolve_grouped(invoices)
         else:
             results = [self.match_invoice(inv) for inv in invoices]
+
+        # Apply the SOP priority chain to resolve TO recipients
+        for result in results:
+            self.resolve_to_recipients(result)
 
         # Partition results
         for result in results:
@@ -742,6 +1140,8 @@ def resolve_contacts(
     contacts: list,
     fuzzy_threshold: float = FUZZY_THRESHOLD,
     group_by_location: bool = True,
+    brand_ar_contacts: dict[str, object] | None = None,
+    rep_email_map: dict[str, str] | None = None,
 ) -> ResolutionReport:
     """One-shot convenience function for contact resolution.
 
@@ -753,6 +1153,9 @@ def resolve_contacts(
         contacts: List of Contact objects (from the Managers sheet).
         fuzzy_threshold: Minimum similarity for fuzzy name matching.
         group_by_location: If True, combine multi-invoice dispensaries.
+        brand_ar_contacts: Optional dict mapping normalized retailer
+            name -> BrandARContact objects (from Brand AR Summary XLSX).
+        rep_email_map: Optional dict mapping rep short name -> email.
 
     Returns:
         A ResolutionReport with all match results and statistics.
@@ -765,7 +1168,12 @@ def resolve_contacts(
         >>> print(report.match_rate)
         1.0
     """
-    resolver = ContactResolver(contacts, fuzzy_threshold=fuzzy_threshold)
+    resolver = ContactResolver(
+        contacts,
+        fuzzy_threshold=fuzzy_threshold,
+        brand_ar_contacts=brand_ar_contacts,
+        rep_email_map=rep_email_map,
+    )
     return resolver.resolve(invoices, group_by_location=group_by_location)
 
 

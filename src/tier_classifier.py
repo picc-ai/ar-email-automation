@@ -4,14 +4,12 @@ AR Email Tier Classifier
 Classifies invoices into email tiers based on days_past_due value.
 Each tier determines the email template, urgency level, and CC routing rules.
 
-Tier Boundaries (verified from XLSX data and email samples):
+3-Tier System (consolidated from original 5-tier):
     COMING_DUE:   days_past_due <= 0   (not yet past due; courtesy reminder)
-    OVERDUE:      days_past_due 1-29   (friendly reminder with timeframe)
-    PAST_DUE_30:  days_past_due 30-39  (OCM warning, formal tone)
-    PAST_DUE_40:  days_past_due 40-49  (OCM warning, Nabis AM looped in)
-    PAST_DUE_50:  days_past_due >= 50  (OCM imminent, expanded CC, phone follow-up)
+    OVERDUE:      days_past_due 1-29   (friendly reminder, static "overdue")
+    PAST_DUE:     days_past_due >= 30  (OCM warning, formal tone, dynamic subject)
 
-Reference: agent-outputs/05-xlsx-data-patterns.md, Section 4 "Email Tier Groupings"
+Subject lines for 30+ use dynamic buckets: 30+, 40+, 50+, etc.
 """
 
 from __future__ import annotations
@@ -29,13 +27,11 @@ class Tier(str, Enum):
     """
     AR collection tiers ordered by escalation severity.
 
-    String values match the subject-line labels observed in the email corpus.
+    3-tier system. Subject lines for 30+ use dynamic bucket labels.
     """
     COMING_DUE = "Coming Due"
     OVERDUE = "Overdue"
-    PAST_DUE_30 = "30+ Days Past Due"
-    PAST_DUE_40 = "40+ Days Past Due"
-    PAST_DUE_50 = "50+ Days Past Due"
+    PAST_DUE = "30+ Days Past Due"
 
 
 # ---------------------------------------------------------------------------
@@ -46,9 +42,7 @@ class Tier(str, Enum):
 # the next tier's lower bound minus one.
 
 TIER_BOUNDARY_OVERDUE: int = 1          # Day 1 starts the "Overdue" window
-TIER_BOUNDARY_PAST_DUE_30: int = 30    # Day 30 starts the "30+" window
-TIER_BOUNDARY_PAST_DUE_40: int = 40    # Day 40 starts the "40+" window
-TIER_BOUNDARY_PAST_DUE_50: int = 50    # Day 50+ starts the final tier
+TIER_BOUNDARY_PAST_DUE_30: int = 30    # Day 30 starts the "30+ Days Past Due" window
 
 # OCM (Office of Cannabis Management) regulatory deadlines referenced in
 # the Past Due email templates.
@@ -127,7 +121,7 @@ class TierMetadata:
     recommended_follow_up: str
 
 
-# Pre-built metadata for each tier, derived from the email corpus analysis.
+# Pre-built metadata for each tier (3-tier system).
 TIER_METADATA: dict[Tier, TierMetadata] = {
     Tier.COMING_DUE: TierMetadata(
         tier=Tier.COMING_DUE,
@@ -168,14 +162,14 @@ TIER_METADATA: dict[Tier, TierMetadata] = {
         days_until_ocm_report=None,
         description=(
             "Friendly reminder acknowledging the invoice is past due. "
-            "Includes empathy clause and overdue timeframe description. "
+            "Uses static 'overdue' phrasing. "
             "Covers days 1-29 past due."
         ),
         recommended_follow_up="Monitor. Follow up manually if no response within 7 days.",
     ),
 
-    Tier.PAST_DUE_30: TierMetadata(
-        tier=Tier.PAST_DUE_30,
+    Tier.PAST_DUE: TierMetadata(
+        tier=Tier.PAST_DUE,
         template_name="past_due_30",
         urgency_level=UrgencyLevel.HIGH,
         cc_rules=CCRules(
@@ -192,63 +186,9 @@ TIER_METADATA: dict[Tier, TierMetadata] = {
         description=(
             "Formal reminder referencing OCM reporting policy. "
             "Mentions 45-day Nabis notification and 52-day mandatory OCM report. "
-            "Nabis AM is explicitly CC'd."
+            "Nabis AM is explicitly CC'd. Subject line uses dynamic bucket label."
         ),
         recommended_follow_up="Ensure Nabis AM is engaged. Verify correct contact info.",
-    ),
-
-    Tier.PAST_DUE_40: TierMetadata(
-        tier=Tier.PAST_DUE_40,
-        template_name="past_due_40",
-        urgency_level=UrgencyLevel.CRITICAL,
-        cc_rules=CCRules(
-            include_nabis_ar=True,
-            include_core_team=True,
-            include_sales_rep=True,
-            include_nabis_am=True,
-            include_additional_retailer_contacts=False,
-            include_additional_picc_managers=True,
-        ),
-        subject_label="40+ Days Past Due",
-        includes_ocm_warning=True,
-        days_until_ocm_report=12,  # 52 - 40
-        description=(
-            "Approaching OCM reporting threshold. "
-            "Nabis AM formally looped via Zendesk. "
-            "Additional PICC managers CC'd."
-        ),
-        recommended_follow_up=(
-            "Phone call recommended. Confirm payment commitment with retailer. "
-            "Prepare for possible OCM reporting."
-        ),
-    ),
-
-    Tier.PAST_DUE_50: TierMetadata(
-        tier=Tier.PAST_DUE_50,
-        template_name="past_due_50",
-        urgency_level=UrgencyLevel.SEVERE,
-        cc_rules=CCRules(
-            include_nabis_ar=True,
-            include_core_team=True,
-            include_sales_rep=True,
-            include_nabis_am=True,
-            include_additional_retailer_contacts=True,
-            include_additional_picc_managers=True,
-        ),
-        subject_label="50+ Days Past Due",
-        includes_ocm_warning=True,
-        days_until_ocm_report=2,  # 52 - 50
-        description=(
-            "Account is at or past the OCM reporting threshold. "
-            "Expanded CC list includes retailer AP/management, "
-            "Nabis AR department, and additional PICC managers. "
-            "Same-day phone follow-up expected."
-        ),
-        recommended_follow_up=(
-            "Immediate phone call required. "
-            "Consider PPP discount incentive. "
-            "Escalate to PICC management if no response within 24 hours."
-        ),
     ),
 }
 
@@ -307,15 +247,11 @@ def classify(days_past_due: Optional[int | float]) -> ClassificationResult:
 
         >>> result = classify(35)
         >>> result.tier
-        <Tier.PAST_DUE_30: '30+ Days Past Due'>
-
-        >>> result = classify(45)
-        >>> result.tier
-        <Tier.PAST_DUE_40: '40+ Days Past Due'>
+        <Tier.PAST_DUE: '30+ Days Past Due'>
 
         >>> result = classify(75)
         >>> result.tier
-        <Tier.PAST_DUE_50: '50+ Days Past Due'>
+        <Tier.PAST_DUE: '30+ Days Past Due'>
         >>> result.is_past_ocm_deadline
         True
     """
@@ -334,13 +270,9 @@ def classify(days_past_due: Optional[int | float]) -> ClassificationResult:
 
     days_past_due = int(days_past_due)
 
-    # Determine tier
-    if days_past_due >= TIER_BOUNDARY_PAST_DUE_50:
-        tier = Tier.PAST_DUE_50
-    elif days_past_due >= TIER_BOUNDARY_PAST_DUE_40:
-        tier = Tier.PAST_DUE_40
-    elif days_past_due >= TIER_BOUNDARY_PAST_DUE_30:
-        tier = Tier.PAST_DUE_30
+    # Determine tier (3-tier system)
+    if days_past_due >= TIER_BOUNDARY_PAST_DUE_30:
+        tier = Tier.PAST_DUE
     elif days_past_due >= TIER_BOUNDARY_OVERDUE:
         tier = Tier.OVERDUE
     else:
@@ -492,59 +424,36 @@ def _get_skip_reason(
 
 
 # ---------------------------------------------------------------------------
-# Overdue Timeframe Description Generator
+# Dynamic Subject Label Generator
 # ---------------------------------------------------------------------------
 
-def get_overdue_timeframe_description(days_past_due: int) -> str:
+def get_dynamic_subject_label(days_past_due: int) -> str:
     """
-    Generate a human-readable overdue timeframe description for the Overdue
-    tier email template.
+    Compute the dynamic subject line label for email subject lines.
 
-    This mirrors the manually-composed phrases observed in the email corpus:
-        - "now past due" (1-3 days)
-        - "over a week past due" (4-10 days)
-        - "nearing two weeks past due" (11-13 days)
-        - "over two weeks past due" (14-20 days)
-        - "over three weeks past due" (21-27 days)
-        - "nearing a month past due" (28-29 days)
-
-    Args:
-        days_past_due: Number of days past due (must be >= 1 for this function
-            to produce meaningful results).
-
-    Returns:
-        A natural-language timeframe string suitable for insertion into
-        the {{OVERDUE_TIMEFRAME}} template variable.
+    Returns 'Coming Due' for <=0, 'Overdue' for 1-29,
+    and '{N}0+ Days Past Due' for 30+ (where N is the decade bucket).
 
     Examples:
-        >>> get_overdue_timeframe_description(2)
-        'now past due'
-        >>> get_overdue_timeframe_description(8)
-        'over a week past due'
-        >>> get_overdue_timeframe_description(15)
-        'over two weeks past due'
-        >>> get_overdue_timeframe_description(22)
-        'over three weeks past due'
+        >>> get_dynamic_subject_label(-2)
+        'Coming Due'
+        >>> get_dynamic_subject_label(15)
+        'Overdue'
+        >>> get_dynamic_subject_label(35)
+        '30+ Days Past Due'
+        >>> get_dynamic_subject_label(45)
+        '40+ Days Past Due'
+        >>> get_dynamic_subject_label(52)
+        '50+ Days Past Due'
+        >>> get_dynamic_subject_label(111)
+        '110+ Days Past Due'
     """
     if days_past_due <= 0:
-        return "due soon"
-    elif days_past_due <= 3:
-        return "now past due"
-    elif days_past_due <= 10:
-        return "over a week past due"
-    elif days_past_due <= 13:
-        return "nearing two weeks past due"
-    elif days_past_due <= 20:
-        return "over two weeks past due"
-    elif days_past_due <= 27:
-        return "over three weeks past due"
-    elif days_past_due <= 29:
-        return "nearing a month past due"
-    else:
-        # This function is intended for the Overdue tier (1-29 days).
-        # For 30+ days, the Past Due templates use a different format.
-        weeks = days_past_due // 7
-        return f"over {weeks} weeks past due"
+        return "Coming Due"
+    if days_past_due <= 29:
+        return "Overdue"
+    bucket = (days_past_due // 10) * 10
+    return f"{bucket}+ Days Past Due"
 
 
 # ---------------------------------------------------------------------------
@@ -640,17 +549,13 @@ def get_tier(days_past_due: Optional[int | float]) -> Tier:
         >>> get_tier(29)
         <Tier.OVERDUE: 'Overdue'>
         >>> get_tier(30)
-        <Tier.PAST_DUE_30: '30+ Days Past Due'>
-        >>> get_tier(39)
-        <Tier.PAST_DUE_30: '30+ Days Past Due'>
+        <Tier.PAST_DUE: '30+ Days Past Due'>
         >>> get_tier(40)
-        <Tier.PAST_DUE_40: '40+ Days Past Due'>
-        >>> get_tier(49)
-        <Tier.PAST_DUE_40: '40+ Days Past Due'>
+        <Tier.PAST_DUE: '30+ Days Past Due'>
         >>> get_tier(50)
-        <Tier.PAST_DUE_50: '50+ Days Past Due'>
+        <Tier.PAST_DUE: '30+ Days Past Due'>
         >>> get_tier(111)
-        <Tier.PAST_DUE_50: '50+ Days Past Due'>
+        <Tier.PAST_DUE: '30+ Days Past Due'>
         >>> get_tier(None)
         <Tier.COMING_DUE: 'Coming Due'>
     """
@@ -675,8 +580,7 @@ def get_metadata(tier: Tier) -> TierMetadata:
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    # Validate against known data from the XLSX analysis
-    # (agent-outputs/05-xlsx-data-patterns.md, Section 11)
+    # Validate against known data -- 3-tier system
     test_cases = [
         # (days_past_due, expected_tier, description)
         (-5, Tier.COMING_DUE, "DeMarinos: -5 days"),
@@ -693,24 +597,24 @@ if __name__ == "__main__":
         (25, Tier.OVERDUE, "Canna Buddha: 25 days"),
         (27, Tier.OVERDUE, "Kushmart: 27 days"),
         (29, Tier.OVERDUE, "Upper bound of Overdue"),
-        (30, Tier.PAST_DUE_30, "Lower bound of 30+"),
-        (31, Tier.PAST_DUE_30, "Royal Blend: 31 days"),
-        (37, Tier.PAST_DUE_30, "Flowery Bronx: 37 days"),
-        (39, Tier.PAST_DUE_30, "Herbwell - Manhattan: 39 days"),
-        (40, Tier.PAST_DUE_40, "Lower bound of 40+"),
-        (49, Tier.PAST_DUE_40, "Upper bound of 40+"),
-        (50, Tier.PAST_DUE_50, "Lower bound of 50+"),
-        (52, Tier.PAST_DUE_50, "My Bud 420: 52 days (at OCM deadline)"),
-        (67, Tier.PAST_DUE_50, "DISPO: 67 days"),
-        (80, Tier.PAST_DUE_50, "Paradise Cannabis: 80 days"),
-        (108, Tier.PAST_DUE_50, "Flynnstoned Brooklyn: 108 days"),
-        (111, Tier.PAST_DUE_50, "Dazed / Travel Agency SoHo: 111 days"),
+        (30, Tier.PAST_DUE, "Lower bound of 30+"),
+        (31, Tier.PAST_DUE, "Royal Blend: 31 days"),
+        (37, Tier.PAST_DUE, "Flowery Bronx: 37 days"),
+        (39, Tier.PAST_DUE, "Herbwell - Manhattan: 39 days"),
+        (40, Tier.PAST_DUE, "40 days (was separate tier, now 30+)"),
+        (49, Tier.PAST_DUE, "49 days (was separate tier, now 30+)"),
+        (50, Tier.PAST_DUE, "50 days (was separate tier, now 30+)"),
+        (52, Tier.PAST_DUE, "My Bud 420: 52 days (at OCM deadline)"),
+        (67, Tier.PAST_DUE, "DISPO: 67 days"),
+        (80, Tier.PAST_DUE, "Paradise Cannabis: 80 days"),
+        (108, Tier.PAST_DUE, "Flynnstoned Brooklyn: 108 days"),
+        (111, Tier.PAST_DUE, "Dazed / Travel Agency SoHo: 111 days"),
         (None, Tier.COMING_DUE, "Null input"),
         (float("nan"), Tier.COMING_DUE, "NaN input"),
     ]
 
     print("=" * 70)
-    print("AR Tier Classifier - Self-Test")
+    print("AR Tier Classifier - Self-Test (3-Tier System)")
     print("=" * 70)
 
     all_passed = True
@@ -724,6 +628,13 @@ if __name__ == "__main__":
             f"  [{status}] days={str(days):>5s}  ->  {result.tier.value:<22s}  "
             f"(expected {expected_tier.value:<22s})  # {desc}"
         )
+
+    print("-" * 70)
+
+    # Test dynamic subject labels
+    print("\nDynamic Subject Labels:")
+    for d in [0, 1, 15, 29, 30, 35, 39, 40, 45, 49, 50, 52, 75, 111]:
+        print(f"  {d:>3d} days -> \"{get_dynamic_subject_label(d)}\"")
 
     print("-" * 70)
 
@@ -774,13 +685,6 @@ if __name__ == "__main__":
         if inv.get("days_until_ocm") is not None:
             ocm_status = "PAST DEADLINE" if inv["is_past_ocm_deadline"] else f"{inv['days_until_ocm']} days remaining"
             print(f"  {inv['order_no']} ({inv['location']}): {inv['days_past_due']}d overdue -> {ocm_status}")
-
-    print("-" * 70)
-
-    # Test overdue timeframe descriptions
-    print("\nOverdue Timeframe Descriptions:")
-    for d in [0, 1, 2, 5, 8, 12, 15, 18, 22, 25, 28, 29]:
-        print(f"  {d:>3d} days -> \"{get_overdue_timeframe_description(d)}\"")
 
     print("=" * 70)
     if all_passed:

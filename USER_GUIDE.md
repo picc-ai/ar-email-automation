@@ -132,9 +132,7 @@ Each email is assigned a "tier" based on how overdue the invoice is. The tier co
 |------|---------------|------|
 | **Coming Due** | Not yet due (payment due soon) | Friendly courtesy reminder |
 | **Overdue** | 1 to 29 days past due | Gentle nudge, still friendly |
-| **30+ Days Past Due** | 30 to 39 days | More formal, mentions OCM reporting |
-| **40+ Days Past Due** | 40 to 49 days | Urgent, subject line says "ACTION REQUIRED" |
-| **50+ Days Past Due** | 50 or more days | Final notice, mentions possible account hold |
+| **30+ Days Past Due** | 30 or more days | More formal, mentions OCM reporting. Subject line dynamically shows 30+, 40+, 50+, etc. based on actual days. |
 
 The tier is automatically assigned based on the data in the spreadsheet. You do not need to choose it manually.
 
@@ -151,7 +149,7 @@ Each row is one email (one store). The columns are:
 | Column | What It Shows |
 |--------|---------------|
 | **#** | Row number |
-| **Tier** | A colored badge showing the urgency level (Coming Due, Overdue, 30+, 40+, 50+) |
+| **Tier** | A colored badge showing the urgency level (Coming Due, Overdue, 30+ Days Past Due) |
 | **Store Name** | The dispensary name. If there are multiple invoices, it shows the count in parentheses, like "(2 invoices)" |
 | **Amount** | Total dollar amount owed across all invoices for that store |
 | **Days** | The maximum number of days past due. Green text means not yet due. Orange means 30+ days. Red means 50+ days. |
@@ -162,9 +160,7 @@ Each row is one email (one store). The columns are:
 
 - **Green badge (Coming Due)** -- Payment is not yet late. This is a heads-up reminder.
 - **Yellow badge (Overdue)** -- Just past due. Gentle follow-up.
-- **Dark yellow badge (30+ Days Past Due)** -- Getting serious. Email mentions OCM reporting.
-- **Light red badge (40+ Days Past Due)** -- Urgent. "ACTION REQUIRED" in the subject line.
-- **Red badge (50+ Days Past Due)** -- Final notice. Mentions account hold.
+- **Red badge (30+ Days Past Due)** -- Getting serious. Email mentions OCM reporting. Subject line dynamically shows the days bracket (30+, 40+, 50+, etc.).
 
 ### What the Flags Mean
 

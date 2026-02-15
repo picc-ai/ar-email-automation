@@ -34,7 +34,7 @@ from src.models import (
 from src.tier_classifier import (
     classify,
     classify_batch,
-    get_overdue_timeframe_description,
+    get_dynamic_subject_label,
     get_tier,
 )
 from src.contact_resolver import (

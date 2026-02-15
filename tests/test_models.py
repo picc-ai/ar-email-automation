@@ -40,11 +40,13 @@ class TestTierEnum:
         assert Tier.T0.value == "Coming Due"
         assert Tier.T1.value == "Overdue"
         assert Tier.T2.value == "30+ Days Past Due"
-        assert Tier.T3.value == "40+ Days Past Due"
-        assert Tier.T4.value == "50+ Days Past Due"
 
     def test_tier_count(self):
-        assert len(Tier) == 5
+        assert len(Tier) == 3
+
+    def test_removed_tiers_do_not_exist(self):
+        assert not hasattr(Tier, "T3")
+        assert not hasattr(Tier, "T4")
 
     @pytest.mark.parametrize("days,expected", [
         (-100, Tier.T0),
@@ -57,13 +59,13 @@ class TestTierEnum:
         (30, Tier.T2),
         (35, Tier.T2),
         (39, Tier.T2),
-        (40, Tier.T3),
-        (45, Tier.T3),
-        (49, Tier.T3),
-        (50, Tier.T4),
-        (75, Tier.T4),
-        (111, Tier.T4),
-        (999, Tier.T4),
+        (40, Tier.T2),   # was T3 (40+), now consolidated into T2
+        (45, Tier.T2),
+        (49, Tier.T2),
+        (50, Tier.T2),   # was T4 (50+), now consolidated into T2
+        (75, Tier.T2),
+        (111, Tier.T2),
+        (999, Tier.T2),
     ])
     def test_from_days(self, days, expected):
         assert Tier.from_days(days) == expected
@@ -159,10 +161,10 @@ class TestInvoice:
         assert inv_30plus.tier == Tier.T2
 
         inv_40plus = self._make_invoice(days_past_due=45)
-        assert inv_40plus.tier == Tier.T3
+        assert inv_40plus.tier == Tier.T2  # consolidated: was T3
 
         inv_50plus = self._make_invoice(days_past_due=111)
-        assert inv_50plus.tier == Tier.T4
+        assert inv_50plus.tier == Tier.T2  # consolidated: was T4
 
     def test_skip_reason_paid(self):
         inv = self._make_invoice(paid=True)
@@ -569,7 +571,7 @@ class TestEmailQueue:
         q.add(self._make_draft(tier=Tier.T0))
         q.add(self._make_draft(tier=Tier.T0))
         q.add(self._make_draft(tier=Tier.T1))
-        q.add(self._make_draft(tier=Tier.T4))
+        q.add(self._make_draft(tier=Tier.T2))
 
         count = q.approve_by_tier(Tier.T0)
         assert count == 2
@@ -702,37 +704,37 @@ class TestTierConfig:
 
     def test_matches_unbounded_max(self):
         tc = TierConfig(
-            tier_name=Tier.T4,
-            min_days=50,
+            tier_name=Tier.T2,
+            min_days=30,
             max_days=None,
-            template_name="past_due_50",
+            template_name="past_due_30",
         )
-        assert tc.matches(50) is True
+        assert tc.matches(30) is True
         assert tc.matches(999) is True
-        assert tc.matches(49) is False
+        assert tc.matches(29) is False
 
     def test_default_tiers(self):
         tiers = TierConfig.default_tiers()
-        assert len(tiers) == 5
+        assert len(tiers) == 3
         assert tiers[0].tier_name == Tier.T0
-        assert tiers[4].tier_name == Tier.T4
+        assert tiers[2].tier_name == Tier.T2
 
     def test_default_tiers_cover_all_ranges(self):
-        """Default tiers should cover from -999 to unbounded."""
+        """Default tiers should cover from -7 to unbounded."""
         tiers = TierConfig.default_tiers()
-        # T0 covers -999 to 0
-        assert tiers[0].min_days == -999
+        # T0 covers -7 to 0
+        assert tiers[0].min_days == -7
         assert tiers[0].max_days == 0
-        # T4 covers 50+
-        assert tiers[4].min_days == 50
-        assert tiers[4].max_days is None
+        # T2 covers 30+
+        assert tiers[2].min_days == 30
+        assert tiers[2].max_days is None
 
     def test_find_tier(self):
         assert TierConfig.find_tier(-5).tier_name == Tier.T0
         assert TierConfig.find_tier(15).tier_name == Tier.T1
         assert TierConfig.find_tier(35).tier_name == Tier.T2
-        assert TierConfig.find_tier(45).tier_name == Tier.T3
-        assert TierConfig.find_tier(100).tier_name == Tier.T4
+        assert TierConfig.find_tier(45).tier_name == Tier.T2   # consolidated
+        assert TierConfig.find_tier(100).tier_name == Tier.T2  # consolidated
 
     def test_find_tier_boundary_values(self):
         assert TierConfig.find_tier(-1).tier_name == Tier.T0
@@ -741,18 +743,18 @@ class TestTierConfig:
         assert TierConfig.find_tier(29).tier_name == Tier.T1
         assert TierConfig.find_tier(30).tier_name == Tier.T2
         assert TierConfig.find_tier(39).tier_name == Tier.T2
-        assert TierConfig.find_tier(40).tier_name == Tier.T3
-        assert TierConfig.find_tier(49).tier_name == Tier.T3
-        assert TierConfig.find_tier(50).tier_name == Tier.T4
+        assert TierConfig.find_tier(40).tier_name == Tier.T2   # consolidated
+        assert TierConfig.find_tier(49).tier_name == Tier.T2   # consolidated
+        assert TierConfig.find_tier(50).tier_name == Tier.T2   # consolidated
 
     def test_find_tier_extreme_negative(self):
-        """Very negative values should match T0."""
-        assert TierConfig.find_tier(-999).tier_name == Tier.T0
+        """Very negative values should match T0 (now -7 lower bound)."""
+        assert TierConfig.find_tier(-7).tier_name == Tier.T0
 
     def test_find_tier_no_match_raises(self):
-        """Values below -999 should raise ValueError with default tiers."""
+        """Values below -7 should raise ValueError with default tiers."""
         with pytest.raises(ValueError):
-            TierConfig.find_tier(-1000)
+            TierConfig.find_tier(-8)
 
     def test_default_tiers_have_cc_rules(self):
         """Each default tier should include CC rules with the rep placeholder."""
@@ -763,6 +765,4 @@ class TestTierConfig:
         tiers = TierConfig.default_tiers()
         assert tiers[0].include_ocm_warning is False  # T0
         assert tiers[1].include_ocm_warning is False  # T1
-        assert tiers[2].include_ocm_warning is True   # T2
-        assert tiers[3].include_ocm_warning is True   # T3
-        assert tiers[4].include_ocm_warning is True   # T4
+        assert tiers[2].include_ocm_warning is True   # T2 (30+ Days Past Due)

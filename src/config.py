@@ -47,14 +47,14 @@ class TierConfig:
 DEFAULT_TIERS: dict[str, TierConfig] = {
     "T1": TierConfig(
         name="T1",
-        min_days=-3,
-        max_days=3,
+        min_days=-7,
+        max_days=0,
         label="Coming Due",
         template_file="coming_due.html",
     ),
     "T2": TierConfig(
         name="T2",
-        min_days=4,
+        min_days=1,
         max_days=29,
         label="Overdue",
         template_file="overdue.html",
@@ -62,24 +62,9 @@ DEFAULT_TIERS: dict[str, TierConfig] = {
     "T3": TierConfig(
         name="T3",
         min_days=30,
-        max_days=39,
+        max_days=999,
         label="30+ Days Past Due",
         template_file="past_due_30.html",
-    ),
-    "T4": TierConfig(
-        name="T4",
-        min_days=40,
-        max_days=49,
-        label="40+ Days Past Due",
-        template_file="past_due_40.html",
-    ),
-    "T5": TierConfig(
-        name="T5",
-        min_days=50,
-        max_days=999,
-        label="50+ Days Past Due",
-        template_file="past_due_50.html",
-        sender_override="mario@piccplatform.com",  # management escalation
     ),
 }
 
@@ -122,15 +107,11 @@ class CCRules:
     ])
 
     # Per-tier additional CC recipients (beyond base + sales rep).
-    # T1-T4 have no extra CCs beyond the base list + the assigned sales rep.
-    # T5 adds Mario as sender (handled via sender_override) and may loop
-    # in additional stakeholders.
+    # All 3 tiers use the same base CC list + sales rep. No escalation.
     tier_extra_cc: dict[str, list[str]] = field(default_factory=lambda: {
         "T1": [],
         "T2": [],
         "T3": [],
-        "T4": [],
-        "T5": [],   # stakeholder additions handled at generation time
     })
 
     # BCC is not used in the current workflow.
@@ -153,8 +134,6 @@ class AttachmentRules:
         "T1": {"ach_form": True, "bol": False, "invoice_pdf": False},
         "T2": {"ach_form": True, "bol": False, "invoice_pdf": False},
         "T3": {"ach_form": True, "bol": False, "invoice_pdf": False},
-        "T4": {"ach_form": True, "bol": "flag", "invoice_pdf": "flag"},
-        "T5": {"ach_form": True, "bol": "flag", "invoice_pdf": "flag"},
     })
 
 
@@ -209,7 +188,7 @@ class SenderInfo:
 
 @dataclass
 class EscalationSender:
-    """Sender used when management escalation kicks in (T5+)."""
+    """Sender used when management escalation kicks in (unused in 3-tier system)."""
     name: str = "Mario Serrano"
     email: str = "mario@piccplatform.com"
     title: str = "Regional Account Manager"
@@ -329,7 +308,7 @@ class ReviewFlags:
     multi_invoice_per_retailer: bool = True
     invoice_has_credits: bool = True
     contact_previously_bounced: bool = True
-    tier_gte_management_escalation: str = "T5"
+    tier_gte_management_escalation: str = "T3"
     retailer_has_open_dispute: bool = True
     days_past_due_exit_threshold: int = 90   # beyond this, flag for non-email action
 

@@ -8,7 +8,7 @@
     PICC AR Email Template: COMING DUE (T1)
     =========================================
     Tier: T1 - Coming Due
-    Trigger: Invoice due date is within 3 days (before or after)
+    Trigger: Invoice due date is -7 to 0 days (before or on due date)
     Tone: Professional-friendly, warm, courtesy reminder
     Urgency: LOW
     Attachment: Nabis ACH Payment Form.pdf
@@ -18,10 +18,7 @@
       PICC - {{STORE_NAME}} - Nabis Invoice {{INVOICE_NUMBER}} - Coming Due
       Multi-invoice: PICC - {{STORE_NAME}} - Nabis Invoices {{INVOICE_NUMBER_1}} & {{INVOICE_NUMBER_2}} - Coming Due
 
-    CHANGE LOG from original:
-    - Fixed "past due" in body to "coming due" (was inconsistent with subject tier)
-    - Added explicit payment deadline CTA
-    - Standardized date format to "Mon DD, YYYY"
+    Body source: Canonical PDF from Callie (A/R Email Formatting.pdf)
   -->
 </head>
 <body style="margin:0; padding:0; background-color:#ffffff;">
@@ -49,11 +46,6 @@
     <br>
 
     <!-- INVOICE DATA BLOCK -->
-    <!--
-      For multi-invoice emails, repeat this block for each invoice
-      separated by a line containing just "and" between blocks.
-      Use {{#EACH INVOICE}} / {{/EACH}} in your templating engine.
-    -->
     <ul style="font-family:Arial,Helvetica,sans-serif; margin-left:20px; padding-left:0;">
       <li><strong>Invoice/Order</strong>: <span style="font-size:11pt; font-family:Arial,Helvetica,sans-serif;">{{INVOICE_NUMBER}}</span></li>
       <li><strong>Due</strong>: <span style="font-size:11pt; font-family:Arial,Helvetica,sans-serif;">{{DUE_DATE}}</span></li>
@@ -65,7 +57,7 @@
 
     <!-- ATTACHMENT REFERENCE -->
     <div style="font-family:Arial,Helvetica,sans-serif;">
-      <strong>Attached is the Nabis ACH payment form (PDF) to facilitate your payment.</strong>
+      <strong>Attached you'll find the Nabis ACH payment form (PDF) to help facilitate your payment.</strong>
     </div>
 
     <br>

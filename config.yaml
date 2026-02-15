@@ -14,14 +14,14 @@
 tiers:
   T1:
     name: "T1"
-    min_days: -3
-    max_days: 3
+    min_days: -7
+    max_days: 0
     label: "Coming Due"
     template_file: "coming_due.html"
 
   T2:
     name: "T2"
-    min_days: 4
+    min_days: 1
     max_days: 29
     label: "Overdue"
     template_file: "overdue.html"
@@ -29,24 +29,9 @@ tiers:
   T3:
     name: "T3"
     min_days: 30
-    max_days: 39
+    max_days: 999
     label: "30+ Days Past Due"
     template_file: "past_due_30.html"
-
-  T4:
-    name: "T4"
-    min_days: 40
-    max_days: 49
-    label: "40+ Days Past Due"
-    template_file: "past_due_40.html"
-
-  T5:
-    name: "T5"
-    min_days: 50
-    max_days: 999
-    label: "50+ Days Past Due"
-    template_file: "past_due_50.html"
-    sender_override: "mario@piccplatform.com"   # management takes over at T5
 
 
 # -----------------------------------------------------------------------------
@@ -67,8 +52,6 @@ cc_rules:
     T1: []
     T2: []
     T3: []
-    T4: []
-    T5: []          # add emails here if T5 needs extra stakeholders
 
   bcc: []           # BCC is not used in the current workflow
 
@@ -95,14 +78,6 @@ attachment_rules:
       ach_form: true
       bol: false
       invoice_pdf: false
-    T4:
-      ach_form: true
-      bol: "flag"           # human decides whether to include BOL
-      invoice_pdf: "flag"
-    T5:
-      ach_form: true
-      bol: "flag"
-      invoice_pdf: "flag"
 
 
 # -----------------------------------------------------------------------------
@@ -138,13 +113,8 @@ sender:
   title: "Accounts Receivable Department"
   company: "PICC Platform"
 
-# Sender used when management escalation kicks in (T5+).
-escalation_sender:
-  name: "Mario Serrano"
-  email: "mario@piccplatform.com"
-  title: "Regional Account Manager"
-  phone: "702.592.5673"
-  company: "PICC Platform"
+# NOTE: escalation_sender section removed -- no sender escalation at any tier
+# per meeting decision (consolidated to 3-tier system).
 
 
 # -----------------------------------------------------------------------------
@@ -180,10 +150,26 @@ signature:
 # -----------------------------------------------------------------------------
 data_files:
   ar_overdue_xlsx: "data/NY Account Receivables_Overdue.xlsx"
+  brand_ar_summary_xlsx: "A:\\Downloads\\Brand AR Summary - PICC (1).xlsx"
   emails_dir: "data/emails"
   ach_form_pdf: "data/Nabis_ACH_Payment_Form.pdf"
   nabis_api_base_url: ""        # future: Nabis API endpoint
   google_sheet_id: ""           # future: Google Sheet for contact data
+
+
+# -----------------------------------------------------------------------------
+# 8b. SALES REP EMAIL MAPPING
+#     Maps rep short names (from Overdue sheet Rep column) to email addresses.
+#     Used for dynamically CC'ing the assigned sales rep.
+# -----------------------------------------------------------------------------
+rep_email_map:
+  "Ben": "b.rosenthal@piccplatform.com"
+  "Bryce J": "bryce@piccplatform.com"
+  "Donovan": "donovan@piccplatform.com"
+  "Eric": "eric@piccplatform.com"
+  "M Martin": "martinm@piccplatform.com"
+  "Mario": "mario@piccplatform.com"
+  "Matt M": "matt@piccplatform.com"
 
 
 # -----------------------------------------------------------------------------
@@ -227,7 +213,7 @@ review_flags:
   multi_invoice_per_retailer: true
   invoice_has_credits: true
   contact_previously_bounced: true
-  tier_gte_management_escalation: "T5"
+  tier_gte_management_escalation: "T3"
   retailer_has_open_dispute: true
   days_past_due_exit_threshold: 90    # beyond this, flag for phone/legal
 
@@ -239,4 +225,6 @@ review_flags:
 schedule:
   run_day: "Wednesday"
   run_time: "07:00"
-  timezone: "America/New_York"
+  timezone: "America/Los_Angeles"
+  default_send_time: "07:00"
+  default_timezone: "US/Pacific"
